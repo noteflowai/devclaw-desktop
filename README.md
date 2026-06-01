@@ -131,6 +131,42 @@ Public desktop builds are published through GitHub Releases:
 
 Early public releases currently ship macOS Apple Silicon builds first. Release assets are intended for end users. CI artifacts are short-lived build outputs for maintainers to test before a release is published.
 
+## Download And Install
+
+### 1. Download the DMG
+
+Download `WeSight-*-arm64.dmg` from the [latest release](https://github.com/freestylefly/wesight/releases/latest), open it, and drag `WeSight.app` into the `Applications` folder.
+
+<p align="center">
+  <img src="public/readme/tutorial/install-dmg.svg" alt="WeSight DMG install guide" width="760">
+</p>
+
+### 2. If macOS says the app is damaged
+
+Preview builds are not signed and notarized yet. macOS may show a message like:
+
+> “WeSight.app” is damaged and cannot be opened. You should move it to the Trash.
+
+This is usually a Gatekeeper quarantine warning for an unsigned app. It does not mean the downloaded package is corrupted. Click Cancel first.
+
+<p align="center">
+  <img src="public/readme/tutorial/macos-damaged-warning.svg" alt="macOS unsigned app warning" width="620">
+</p>
+
+### 3. Remove the quarantine attribute
+
+Open the built-in macOS Terminal app and run:
+
+```bash
+xattr -cr /Applications/WeSight.app
+```
+
+<p align="center">
+  <img src="public/readme/tutorial/xattr-terminal.svg" alt="Run xattr in Terminal" width="760">
+</p>
+
+After the command finishes, open WeSight again. If you installed WeSight somewhere else, replace `/Applications/WeSight.app` with the actual path to your `WeSight.app`.
+
 ## Quick Start
 
 ### Requirements

@@ -131,6 +131,42 @@ WeSight 把模型配置集中在一个设置页。某个引擎选择“跟随 We
 
 早期公开版本优先提供 macOS Apple Silicon 安装包。Release assets 面向最终用户下载。CI artifacts 作为维护者测试构建产物的临时入口。
 
+## 下载与安装教程
+
+### 1. 下载 DMG 并安装
+
+从 [最新版本](https://github.com/freestylefly/wesight/releases/latest) 下载 `WeSight-*-arm64.dmg`，打开后将 `WeSight.app` 拖入 `Applications` 文件夹。
+
+<p align="center">
+  <img src="public/readme/tutorial/install-dmg.svg" alt="WeSight DMG 安装示意图" width="760">
+</p>
+
+### 2. 如果 macOS 提示应用已损坏
+
+当前预览版还没有完成 Apple 开发者签名和公证，macOS 可能会显示：
+
+> “WeSight.app” 已损坏，无法打开。你应该将它移到废纸篓。
+
+这通常是 macOS Gatekeeper 对未签名应用添加的隔离提示，不代表安装包真的损坏。请先点击“取消”，不要移到废纸篓。
+
+<p align="center">
+  <img src="public/readme/tutorial/macos-damaged-warning.svg" alt="macOS 未签名应用损坏提示" width="620">
+</p>
+
+### 3. 解除隔离属性并重新打开
+
+打开 macOS 自带的“终端”，输入下面的命令：
+
+```bash
+xattr -cr /Applications/WeSight.app
+```
+
+<p align="center">
+  <img src="public/readme/tutorial/xattr-terminal.svg" alt="在终端执行 xattr 命令" width="760">
+</p>
+
+命令执行完成后，重新打开 WeSight 即可。如果你没有把 WeSight 放到 `Applications` 文件夹，请把命令里的路径换成实际的 `WeSight.app` 路径。
+
 ## 快速开始
 
 ### 环境要求

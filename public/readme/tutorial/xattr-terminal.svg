@@ -1,0 +1,15 @@
+<svg width="960" height="560" viewBox="0 0 960 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="560" rx="28" fill="#f3f4f6"/>
+  <rect x="38" y="42" width="884" height="476" rx="18" fill="#101827" stroke="#1f2937"/>
+  <rect x="38" y="42" width="884" height="60" rx="18" fill="#e5e7eb"/>
+  <circle cx="72" cy="72" r="12" fill="#ff5f57"/>
+  <circle cx="108" cy="72" r="12" fill="#febc2e"/>
+  <circle cx="144" cy="72" r="12" fill="#28c840"/>
+  <text x="480" y="80" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700" fill="#374151">Terminal — zsh</text>
+  <text x="80" y="168" font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="24" fill="#94a3b8">Last login: Mon Jun 1 on ttys000</text>
+  <text x="80" y="230" font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="28" fill="#22c55e">canghe@MacBook ~ %</text>
+  <rect x="78" y="262" width="804" height="76" rx="12" fill="#0b1220" stroke="#334155"/>
+  <text x="108" y="310" font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="30" fill="#f8fafc">xattr -cr /Applications/WeSight.app</text>
+  <text x="80" y="406" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#cbd5e1">执行完成后，重新打开 WeSight 即可。</text>
+  <text x="80" y="452" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#94a3b8">如果应用没有放在 Applications，请把命令里的路径换成实际的 WeSight.app 路径。</text>
+</svg>
