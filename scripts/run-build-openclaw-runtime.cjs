@@ -19,18 +19,16 @@ function resolveBashExecutable(rootDir) {
   // WSL bash (WindowsApps\bash.exe) runs in a separate Linux environment and
   // cannot access Windows-installed node, npm, pnpm, etc.
 
-  // 1. Check all bash locations, prefer Git Bash over WSL bash.
-  try {
-    const result = spawnSync('where', ['bash'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    if (result.status === 0 && result.stdout) {
-      const paths = result.stdout.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean);
-      const gitBash = paths.find(p => !p.toLowerCase().includes('windowsapps'));
-      if (gitBash) return gitBash;
+  // 1. Bundled mingit bash.
+  const bundledCandidates = [
+    path.join(rootDir, 'resources', 'mingit', 'bin', 'bash.exe'),
+    path.join(rootDir, 'resources', 'mingit', 'usr', 'bin', 'bash.exe'),
+  ];
+  for (const candidate of bundledCandidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
     }
-  } catch {}
+  }
 
   // 2. Derive bash path from git installation.
   try {
@@ -51,16 +49,18 @@ function resolveBashExecutable(rootDir) {
     }
   } catch {}
 
-  // 3. Bundled mingit bash.
-  const candidates = [
-    path.join(rootDir, 'resources', 'mingit', 'bin', 'bash.exe'),
-    path.join(rootDir, 'resources', 'mingit', 'usr', 'bin', 'bash.exe'),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
+  // 3. Check all bash locations, prefer Git Bash over WSL bash.
+  try {
+    const result = spawnSync('where', ['bash'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (result.status === 0 && result.stdout) {
+      const paths = result.stdout.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean);
+      const gitBash = paths.find(p => !p.toLowerCase().includes('windowsapps'));
+      if (gitBash) return gitBash;
     }
-  }
+  } catch {}
 
   return null;
 }

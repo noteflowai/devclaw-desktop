@@ -1,6 +1,7 @@
 export const CoworkModelProtocol = {
   Anthropic: 'anthropic',
   GeminiNative: 'gemini_native',
+  OpenAICompat: 'openai_compat',
 } as const;
 
 export type CoworkModelProtocol = typeof CoworkModelProtocol[keyof typeof CoworkModelProtocol];
@@ -53,6 +54,20 @@ export function buildAnthropicMessagesUrl(baseUrl: string): string {
     return `${normalized}/messages`;
   }
   return `${normalized}/v1/messages`;
+}
+
+export function buildOpenAIChatCompletionsUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, '');
+  if (!normalized) {
+    return '/v1/chat/completions';
+  }
+  if (normalized.endsWith('/chat/completions')) {
+    return normalized;
+  }
+  if (normalized.endsWith('/v1')) {
+    return `${normalized}/chat/completions`;
+  }
+  return `${normalized}/v1/chat/completions`;
 }
 
 export function normalizeGeminiBaseUrl(rawBaseUrl: string): string {
@@ -156,4 +171,34 @@ export function extractTextFromGeminiResponse(payload: unknown): string {
   }
 
   return '';
+}
+
+export function extractTextFromOpenAIChatCompletionResponse(payload: unknown): string {
+  const record = toRecord(payload);
+  if (!record) {
+    return '';
+  }
+
+  const directTexts = collectTextFromUnknown(record.output_text);
+  if (directTexts.length > 0) {
+    return directTexts.join('\n').trim();
+  }
+
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  const choiceTexts = choices.flatMap((choice) => {
+    const choiceRecord = toRecord(choice);
+    if (!choiceRecord) {
+      return [];
+    }
+
+    const message = toRecord(choiceRecord.message);
+    const delta = toRecord(choiceRecord.delta);
+    return [
+      ...collectTextFromUnknown(message?.content),
+      ...collectTextFromUnknown(delta?.content),
+      ...collectTextFromUnknown(choiceRecord.text),
+    ];
+  });
+
+  return choiceTexts.join('\n').trim();
 }

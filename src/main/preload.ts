@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('electron', {
       method: string;
       headers: Record<string, string>;
       body?: string;
+      expectedStatuses?: number[];
     }) => ipcRenderer.invoke('api:fetch', options),
 
     // 流式 API 请求

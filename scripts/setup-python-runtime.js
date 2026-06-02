@@ -372,6 +372,39 @@ async function downloadArchive(url, destination) {
   }
 }
 
+function extractArchive(archivePath, destination) {
+  if (process.platform !== 'win32') {
+    return extractZip(archivePath, { dir: destination });
+  }
+
+  fs.mkdirSync(destination, { recursive: true });
+  const command = [
+    'Expand-Archive',
+    '-LiteralPath',
+    `'${archivePath.replace(/'/g, "''")}'`,
+    '-DestinationPath',
+    `'${destination.replace(/'/g, "''")}'`,
+    '-Force',
+  ].join(' ');
+
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    command,
+  ], {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+    timeout: 5 * 60 * 1000,
+  });
+
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new Error(`Expand-Archive failed for ${archivePath}${detail ? `\n${detail}` : ''}`);
+  }
+}
+
 async function resolveArchive(required) {
   const envArchive = resolveInputPath(process.env.LOBSTERAI_PORTABLE_PYTHON_ARCHIVE);
   if (envArchive) {
@@ -547,7 +580,7 @@ async function bootstrapRuntimeOnWindows() {
 async function extractArchiveToRuntime(archivePath) {
   const tempRoot = fs.mkdtempSync(path.join(PROJECT_ROOT, 'tmp-python-runtime-'));
   try {
-    await extractZip(archivePath, { dir: tempRoot });
+    await extractArchive(archivePath, tempRoot);
     const runtimeRoot = findRuntimeRoot(tempRoot);
     if (!runtimeRoot) {
       throw new Error('Could not locate python runtime root after extraction.');

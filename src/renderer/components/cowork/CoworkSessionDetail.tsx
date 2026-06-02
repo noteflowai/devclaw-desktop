@@ -2534,17 +2534,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     }
   }, [coworkConfig.agentEngine, currentSession?.runtimeSnapshot?.agentEngine]);
 
-  const lockedRuntimeSnapshot = useMemo(() => currentSession?.runtimeSnapshot ?? {
-    agentEngine: coworkConfig.agentEngine,
-    engineLabel: getEngineLabel(),
-    providerKey: null,
-    providerName: null,
-    modelId: null,
-    modelName: null,
-    modelLabel: i18nService.t('coworkRuntimeLockedUnknownModel'),
-    configSource: null,
-    capturedAt: currentSession?.createdAt ?? Date.now(),
-  }, [
+  const lockedRuntimeSnapshot = useMemo(() => currentSession?.runtimeSnapshot ?? null, [
     coworkConfig.agentEngine,
     currentSession?.createdAt,
     currentSession?.runtimeSnapshot,

@@ -2714,7 +2714,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   };
 
   const handleInstallAgentCli = async (appType: ExternalAgentProviderAppType) => {
-    if (window.electron?.platform !== 'darwin') {
+    if (window.electron?.platform !== 'darwin' && window.electron?.platform !== 'win32') {
       setError(i18nService.t('coworkAgentEngineInstallCliUnsupported'));
       return;
     }
@@ -2751,7 +2751,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   };
 
   const handleInstallHermesEngine = async () => {
-    if (window.electron?.platform !== 'darwin') {
+    if (window.electron?.platform !== 'darwin' && window.electron?.platform !== 'win32') {
       setError(i18nService.t('coworkAgentEngineInstallCliUnsupported'));
       return;
     }
@@ -2838,7 +2838,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const renderAgentEngineMeta = (engine: CoworkAgentEngine) => {
     const cliStatus = getCliEngineStatus(engine);
     if (!cliStatus) return null;
-    const isMacOS = window.electron?.platform === 'darwin';
+    const canInstall = window.electron?.platform === 'darwin' || window.electron?.platform === 'win32';
     const isInstalling = agentCliInstallingAppType === cliStatus.appType;
     const installProgress = agentCliInstallProgress[cliStatus.appType];
 
@@ -2862,12 +2862,12 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="flex items-center gap-1.5">
             <span className={`h-1.5 w-1.5 rounded-full ${cliStatus.found ? 'bg-green-500' : 'bg-amber-500'}`} />
-            <span className={cliStatus.found ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}>
+          <span className={cliStatus.found ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}>
               {i18nService.t(cliStatus.found ? 'coworkAgentEngineCliInstalled' : 'coworkAgentEngineCliMissing')}
             </span>
           </span>
           {!cliStatus.found && (
-            isMacOS ? (
+            canInstall ? (
               <button
                 type="button"
                 onClick={(event) => {

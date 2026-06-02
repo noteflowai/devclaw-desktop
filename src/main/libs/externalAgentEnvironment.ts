@@ -321,13 +321,97 @@ const quoteForShell = (value: string): string => {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 };
 
+const getWindowsSearchPaths = (command: string): string[] => {
+  const home = homeDir();
+  const appData = process.env.APPDATA || '';
+  const localAppData = process.env.LOCALAPPDATA || '';
+  const userName = path.basename(home);
+
+  if (command === 'hermes') {
+    return [
+      path.join(appData, 'npm', 'hermes.cmd'),
+      path.join(appData, 'npm', 'hermes.exe'),
+      path.join(home, '.local', 'bin', 'hermes.exe'),
+      path.join(home, '.hermes', 'bin', 'hermes.exe'),
+      path.join(localAppData, 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'),
+      `\\\\wsl$\\Ubuntu\\home\\${userName}\\.local\\bin\\hermes`,
+      `\\\\wsl$\\Ubuntu\\home\\${userName}\\.hermes\\bin\\hermes`,
+      'D:\\Program Files\\Hermes Studio\\resources\\python\\Scripts\\hermes.cmd',
+      'C:\\Program Files\\Hermes Studio\\resources\\python\\Scripts\\hermes.cmd',
+    ];
+  }
+  if (command === 'claude') {
+    return [
+      path.join(appData, 'npm', 'claude.cmd'),
+      path.join(home, '.local', 'bin', 'claude.exe'),
+    ];
+  }
+  if (command === 'codex') {
+    return [
+      path.join(appData, 'npm', 'codex.cmd'),
+    ];
+  }
+  if (command === 'openclaw') {
+    return [
+      path.join(appData, 'npm', 'openclaw.cmd'),
+      'C:\\Program Files (x86)\\ClawX\\resources\\cli\\openclaw',
+      'C:\\Program Files\\ClawX\\resources\\cli\\openclaw',
+      path.join(localAppData, 'Programs', 'ClawX', 'resources', 'cli', 'openclaw'),
+      path.join(home, '.openclaw', 'bin', 'openclaw'),
+    ];
+  }
+  if (command === 'opencode') {
+    return [
+      path.join(appData, 'npm', 'opencode.cmd'),
+    ];
+  }
+  if (command === 'qwen') {
+    return [
+      path.join(appData, 'npm', 'qwen.cmd'),
+    ];
+  }
+  if (command === 'deepseek-tui') {
+    return [
+      path.join(appData, 'npm', 'deepseek-tui.cmd'),
+    ];
+  }
+
+  return [];
+};
+
+const preferWindowsExecutable = (candidates: string[]): string | null => {
+  if (candidates.length === 0) return null;
+  return candidates.find((candidate) => /\.(cmd|exe|bat)$/i.test(candidate))
+    ?? candidates[0]
+    ?? null;
+};
+
+const isWindowsCommandShim = (commandPath: string): boolean => {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(commandPath);
+};
+
+const buildWindowsCommandShimArgs = (commandPath: string, args: string[]): string[] => {
+  return ['/d', '/s', '/c', `call "${commandPath}" ${args.map((arg) => `"${arg.replace(/"/g, '\\"')}"`).join(' ')}`];
+};
+
 const resolveCommand = (command: string): { found: boolean; path: string | null; error: string | null } => {
+  if (process.platform === 'win32') {
+    for (const candidate of getWindowsSearchPaths(command)) {
+      if (candidate && fs.existsSync(candidate)) {
+        return { found: true, path: candidate, error: null };
+      }
+    }
+  }
+
   const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', [command], {
     encoding: 'utf8',
     shell: false,
   });
   if (result.status === 0) {
-    const commandPath = result.stdout.split(/\r?\n/).map(line => line.trim()).find(Boolean) ?? null;
+    const candidates = result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const commandPath = process.platform === 'win32'
+      ? preferWindowsExecutable(candidates)
+      : candidates[0] ?? null;
     return { found: Boolean(commandPath), path: commandPath, error: null };
   }
 
@@ -358,10 +442,16 @@ const resolveCommand = (command: string): { found: boolean; path: string | null;
 };
 
 const readCommandVersion = (command: string): string | null => {
-  const result = spawnSync(command, ['--version'], {
+  const versionArgs = ['--version'];
+  const executable = isWindowsCommandShim(command) ? 'cmd.exe' : command;
+  const args = isWindowsCommandShim(command)
+    ? buildWindowsCommandShimArgs(command, versionArgs)
+    : versionArgs;
+  const result = spawnSync(executable, args, {
     encoding: 'utf8',
     shell: false,
     timeout: 10_000,
+    windowsVerbatimArguments: isWindowsCommandShim(command),
   });
   if (result.status !== 0) return null;
   return (result.stdout || result.stderr || '').trim() || null;

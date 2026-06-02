@@ -180,8 +180,8 @@
     }
   },
   "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
+    "oneClick": true,
+    "allowToChangeInstallationDirectory": false,
     "runAfterFinish": true,
     "deleteAppDataOnUninstall": true,
     "include": "scripts/nsis-installer.nsh"

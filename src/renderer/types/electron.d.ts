@@ -577,6 +577,7 @@ interface IElectronAPI {
       method: string;
       headers: Record<string, string>;
       body?: string;
+      expectedStatuses?: number[];
     }) => Promise<ApiResponse>;
     stream: (options: {
       url: string;

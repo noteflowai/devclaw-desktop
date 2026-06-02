@@ -2,9 +2,11 @@ import { describe, expect, test } from 'vitest';
 import {
   buildAnthropicMessagesUrl,
   buildGeminiGenerateContentUrl,
+  buildOpenAIChatCompletionsUrl,
   extractApiErrorSnippet,
   extractTextFromAnthropicResponse,
   extractTextFromGeminiResponse,
+  extractTextFromOpenAIChatCompletionResponse,
   normalizeGeminiBaseUrl,
 } from './coworkModelApi';
 
@@ -13,6 +15,14 @@ describe('coworkModelApi', () => {
     expect(buildAnthropicMessagesUrl('https://example.com/v1')).toBe('https://example.com/v1/messages');
     expect(buildAnthropicMessagesUrl('https://example.com')).toBe('https://example.com/v1/messages');
     expect(buildAnthropicMessagesUrl('https://example.com/v1/messages')).toBe('https://example.com/v1/messages');
+  });
+
+  test('builds openai chat completions url from base url', () => {
+    expect(buildOpenAIChatCompletionsUrl('https://example.com/v1')).toBe('https://example.com/v1/chat/completions');
+    expect(buildOpenAIChatCompletionsUrl('https://example.com')).toBe('https://example.com/v1/chat/completions');
+    expect(buildOpenAIChatCompletionsUrl('https://example.com/v1/chat/completions')).toBe(
+      'https://example.com/v1/chat/completions'
+    );
   });
 
   test('normalizes gemini base url variants', () => {
@@ -63,5 +73,38 @@ describe('coworkModelApi', () => {
         ],
       })
     ).toBe('Gemini title\nSecond line');
+  });
+
+  test('extracts openai chat completion assistant content', () => {
+    expect(
+      extractTextFromOpenAIChatCompletionResponse({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'OK',
+              reasoning_content: 'Reasoning should not be treated as final text.',
+            },
+          },
+        ],
+      })
+    ).toBe('OK');
+  });
+
+  test('does not treat openai reasoning content as assistant text', () => {
+    expect(
+      extractTextFromOpenAIChatCompletionResponse({
+        choices: [
+          {
+            finish_reason: 'length',
+            message: {
+              role: 'assistant',
+              content: '',
+              reasoning_content: 'The model only produced reasoning tokens.',
+            },
+          },
+        ],
+      })
+    ).toBe('');
   });
 });

@@ -56,6 +56,14 @@ type RuntimeMetadata = {
   expectedPathHint: string;
 };
 
+const isWindowsCommandShim = (commandPath: string): boolean => {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(commandPath);
+};
+
+const buildWindowsCommandShimArgs = (commandPath: string, args: string[]): string[] => {
+  return ['/d', '/s', '/c', `call "${commandPath}" ${args.map((arg) => `"${arg.replace(/"/g, '\\"')}"`).join(' ')}`];
+};
+
 const ensureDir = (dirPath: string): void => {
   fs.mkdirSync(dirPath, { recursive: true });
 };
@@ -75,12 +83,26 @@ const findPath = (candidates: string[]): string | null => {
   return null;
 };
 
-const buildHermesSearchPath = (): string => [
-  path.join(os.homedir(), '.local', 'bin'),
-  '/opt/homebrew/bin',
-  '/usr/local/bin',
-  process.env.PATH ?? '',
-].join(path.delimiter);
+const buildHermesSearchPath = (): string => {
+  const paths = [
+    path.join(os.homedir(), '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ];
+
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || '';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    paths.push(
+      path.join(appData, 'npm'),
+      path.join(os.homedir(), '.hermes', 'bin'),
+      path.join(localAppData, 'hermes', 'hermes-agent', 'venv', 'Scripts'),
+    );
+  }
+
+  paths.push(process.env.PATH ?? '');
+  return paths.join(path.delimiter);
+};
 
 const progressPercentForInstallPhase = (phase: HermesInstallProgressPhase): number | undefined => {
   switch (phase) {
@@ -429,13 +451,19 @@ export class HermesEngineManager extends EventEmitter {
       }
     }
 
+    const gatewayArgs = ['gateway', 'run', '--replace'];
+    const spawnCommand = isWindowsCommandShim(runtime.commandPath) ? 'cmd.exe' : runtime.commandPath;
+    const spawnArgs = isWindowsCommandShim(runtime.commandPath)
+      ? buildWindowsCommandShimArgs(runtime.commandPath, gatewayArgs)
+      : gatewayArgs;
     const child = spawn(
-      runtime.commandPath,
-      ['gateway'],
+      spawnCommand,
+      spawnArgs,
       {
         cwd: os.homedir(),
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsVerbatimArguments: isWindowsCommandShim(runtime.commandPath),
         windowsHide: process.platform === 'win32',
       },
     );
@@ -474,18 +502,40 @@ export class HermesEngineManager extends EventEmitter {
   }
 
   private resolveRuntimeMetadata(): RuntimeMetadata {
+    const home = os.homedir();
+    const appData = process.env.APPDATA || '';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    const userName = path.basename(home);
     const candidates = [
       this.resolveCommandFromShell('hermes'),
-      path.join(os.homedir(), '.local', 'bin', 'hermes'),
+      path.join(home, '.local', 'bin', 'hermes'),
       '/opt/homebrew/bin/hermes',
       '/usr/local/bin/hermes',
+      ...(process.platform === 'win32' ? [
+        this.resolveWindowsCommand('hermes'),
+        path.join(appData, 'npm', 'hermes.cmd'),
+        path.join(appData, 'npm', 'hermes.exe'),
+        path.join(appData, 'npm', 'hermes.bat'),
+        path.join(home, '.local', 'bin', 'hermes.exe'),
+        path.join(home, '.hermes', 'bin', 'hermes.exe'),
+        path.join(localAppData, 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'),
+        'D:\\Program Files\\Hermes Studio\\resources\\python\\Scripts\\hermes.cmd',
+        'C:\\Program Files\\Hermes Studio\\resources\\python\\Scripts\\hermes.cmd',
+        `\\\\wsl$\\Ubuntu\\home\\${userName}\\.local\\bin\\hermes`,
+        `\\\\wsl$\\Ubuntu\\home\\${userName}\\.hermes\\bin\\hermes`,
+      ] : []),
     ].filter((value): value is string => Boolean(value));
     const commandPath = findPath(candidates);
     const expectedPathHint = [
       'PATH:hermes',
-      path.join(os.homedir(), '.local', 'bin', 'hermes'),
+      path.join(home, '.local', 'bin', 'hermes'),
       '/opt/homebrew/bin/hermes',
       '/usr/local/bin/hermes',
+      ...(process.platform === 'win32' ? [
+        path.join(appData, 'npm', 'hermes.cmd'),
+        path.join(home, '.hermes', 'bin', 'hermes.exe'),
+        path.join(localAppData, 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'),
+      ] : []),
     ].join(', ');
 
     if (!commandPath) {
@@ -499,6 +549,10 @@ export class HermesEngineManager extends EventEmitter {
   }
 
   private resolveCommandFromShell(command: string): string | null {
+    if (process.platform === 'win32') {
+      return this.resolveWindowsCommand(command);
+    }
+
     const shell = process.env.SHELL || '/bin/zsh';
     const result = spawnSync(shell, ['-lc', `command -v ${command}`], {
       encoding: 'utf8',
@@ -512,14 +566,40 @@ export class HermesEngineManager extends EventEmitter {
     return result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
   }
 
-  private readCommandVersion(commandPath: string): string | null {
-    const result = spawnSync(commandPath, ['--version'], {
+  private resolveWindowsCommand(command: string): string | null {
+    const result = spawnSync('where.exe', [command], {
       encoding: 'utf8',
       timeout: 10_000,
       env: {
         ...process.env,
         PATH: buildHermesSearchPath(),
       },
+    });
+    if (result.status !== 0) return null;
+
+    const candidates = result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return candidates.find((candidate) => /\.(cmd|exe|bat)$/i.test(candidate))
+      ?? candidates[0]
+      ?? null;
+  }
+
+  private readCommandVersion(commandPath: string): string | null {
+    const versionArgs = ['--version'];
+    const spawnCommand = isWindowsCommandShim(commandPath) ? 'cmd.exe' : commandPath;
+    const spawnArgs = isWindowsCommandShim(commandPath)
+      ? buildWindowsCommandShimArgs(commandPath, versionArgs)
+      : versionArgs;
+    const result = spawnSync(spawnCommand, spawnArgs, {
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        PATH: buildHermesSearchPath(),
+      },
+      windowsVerbatimArguments: isWindowsCommandShim(commandPath),
     });
     if (result.status !== 0) return null;
     return (result.stdout || result.stderr || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;

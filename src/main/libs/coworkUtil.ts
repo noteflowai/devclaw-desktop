@@ -8,10 +8,12 @@ import { coworkLog } from './coworkLogger';
 import {
   buildAnthropicMessagesUrl,
   buildGeminiGenerateContentUrl,
+  buildOpenAIChatCompletionsUrl,
   CoworkModelProtocol,
   extractApiErrorSnippet,
   extractTextFromAnthropicResponse,
   extractTextFromGeminiResponse,
+  extractTextFromOpenAIChatCompletionResponse,
 } from './coworkModelApi';
 import type { OpenAICompatProxyTarget } from './coworkOpenAICompatProxy';
 import { appendPythonRuntimeToEnv } from './pythonRuntime';
@@ -1147,26 +1149,31 @@ function applyPackagedEnvOverrides(env: Record<string, string | undefined>): voi
     env.HOME = app.getPath('home');
   }
 
-  // Resolve user's shell PATH so that node, npm, and other tools are findable
-  const userPath = resolveUserShellPath();
-  if (userPath) {
-    env.PATH = userPath;
-    coworkLog('INFO', 'applyPackagedEnvOverrides', `Resolved user shell PATH (${userPath.split(delimiter).length} entries)`);
-    for (const entry of userPath.split(delimiter)) {
-      coworkLog('INFO', 'applyPackagedEnvOverrides', `  PATH entry: ${entry} (exists: ${existsSync(entry)})`);
-    }
+  // Resolve user's shell PATH so that node, npm, and other tools are findable.
+  // Windows already reconstructs PATH from the registry and bundled runtimes above.
+  if (process.platform === 'win32') {
+    coworkLog('INFO', 'applyPackagedEnvOverrides', 'Windows packaged mode: using reconstructed PATH from system, registry, Git, Python, and bundled Node shims');
   } else {
-    // Fallback: append common node installation paths
-    const home = env.HOME || app.getPath('home');
-    const commonPaths = [
-      '/usr/local/bin',
-      '/opt/homebrew/bin',
-      `${home}/.nvm/current/bin`,
-      `${home}/.volta/bin`,
-      `${home}/.fnm/current/bin`,
-    ];
-    env.PATH = [env.PATH, ...commonPaths].filter(Boolean).join(delimiter);
-    coworkLog('WARN', 'applyPackagedEnvOverrides', `Failed to resolve user shell PATH, using fallback common paths`);
+    const userPath = resolveUserShellPath();
+    if (userPath) {
+      env.PATH = userPath;
+      coworkLog('INFO', 'applyPackagedEnvOverrides', `Resolved user shell PATH (${userPath.split(delimiter).length} entries)`);
+      for (const entry of userPath.split(delimiter)) {
+        coworkLog('INFO', 'applyPackagedEnvOverrides', `  PATH entry: ${entry} (exists: ${existsSync(entry)})`);
+      }
+    } else {
+      // Fallback: append common node installation paths.
+      const home = env.HOME || app.getPath('home');
+      const commonPaths = [
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        `${home}/.nvm/current/bin`,
+        `${home}/.volta/bin`,
+        `${home}/.fnm/current/bin`,
+      ];
+      env.PATH = [env.PATH, ...commonPaths].filter(Boolean).join(delimiter);
+      coworkLog('WARN', 'applyPackagedEnvOverrides', `Failed to resolve user shell PATH, using fallback common paths`);
+    }
   }
 
   const resourcesPath = process.resourcesPath;
@@ -1458,7 +1465,7 @@ export async function getEnhancedEnvWithTmpdir(
 
 const SESSION_TITLE_FALLBACK = 'New Session';
 const SESSION_TITLE_MAX_CHARS = 50;
-const SESSION_TITLE_TIMEOUT_MS = 8000;
+const SESSION_TITLE_TIMEOUT_MS = 15000;
 const COWORK_MODEL_PROBE_TIMEOUT_MS = 20000;
 
 type SessionTitleApiConfig =
@@ -1470,6 +1477,12 @@ type SessionTitleApiConfig =
     }
   | {
       protocol: typeof CoworkModelProtocol.GeminiNative;
+      apiKey: string;
+      baseURL: string;
+      model: string;
+    }
+  | {
+      protocol: typeof CoworkModelProtocol.OpenAICompat;
       apiKey: string;
       baseURL: string;
       model: string;
@@ -1493,6 +1506,17 @@ function resolveSessionTitleApiConfig(): { config: SessionTitleApiConfig | null;
     return {
       config: null,
       error: resolution.error ?? rawResolution.error,
+    };
+  }
+
+  if (resolution.config.apiType === 'openai') {
+    return {
+      config: {
+        protocol: CoworkModelProtocol.OpenAICompat,
+        apiKey: resolution.config.apiKey,
+        baseURL: resolution.config.baseURL,
+        model: resolution.config.model,
+      },
     };
   }
 
@@ -1578,26 +1602,35 @@ export async function probeCoworkModelReadiness(
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const isGemini = config.protocol === CoworkModelProtocol.GeminiNative;
+  const isOpenAICompat = config.protocol === CoworkModelProtocol.OpenAICompat;
 
   try {
     const response = await fetch(
-      config.protocol === CoworkModelProtocol.GeminiNative
+      isGemini
         ? buildGeminiGenerateContentUrl(config.baseURL, config.model)
+        : isOpenAICompat
+          ? buildOpenAIChatCompletionsUrl(config.baseURL)
         : buildAnthropicMessagesUrl(config.baseURL),
       {
         method: 'POST',
-        headers: config.protocol === CoworkModelProtocol.GeminiNative
+        headers: isGemini
           ? {
               'Content-Type': 'application/json',
               'x-goog-api-key': config.apiKey,
             }
+          : isOpenAICompat
+            ? {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.apiKey}`,
+              }
           : {
               'Content-Type': 'application/json',
               'x-api-key': config.apiKey,
               'anthropic-version': '2023-06-01',
             },
         body: JSON.stringify(
-          config.protocol === CoworkModelProtocol.GeminiNative
+          isGemini
             ? {
                 contents: [{ role: 'user', parts: [{ text: 'Reply with "ok".' }] }],
                 generationConfig: {
@@ -1605,6 +1638,15 @@ export async function probeCoworkModelReadiness(
                   temperature: 0,
                 },
               }
+            : isOpenAICompat
+              ? {
+                  model: config.model,
+                  messages: [{ role: 'user', content: 'Reply with "ok".' }],
+                  // 推理模型可能先消耗 reasoning tokens，过小会 HTTP 200 但正文为空。
+                  max_tokens: 128,
+                  temperature: 0,
+                  stream: false,
+                }
             : {
                 model: config.model,
                 max_tokens: 1,
@@ -1617,13 +1659,27 @@ export async function probeCoworkModelReadiness(
     );
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
+      const errorText = await response.text().catch((): string => '');
       const errorSnippet = extractApiErrorSnippet(errorText);
       return {
         ok: false,
         error: errorSnippet
           ? `Model validation failed (${response.status}): ${errorSnippet}`
           : `Model validation failed with status ${response.status}.`,
+      };
+    }
+
+    const payload = await response.json().catch((): null => null);
+    const text = isGemini
+      ? extractTextFromGeminiResponse(payload)
+      : isOpenAICompat
+        ? extractTextFromOpenAIChatCompletionResponse(payload)
+        : extractTextFromAnthropicResponse(payload);
+
+    if (!text.trim()) {
+      return {
+        ok: false,
+        error: 'Model validation failed: response did not include assistant text.',
       };
     }
 
@@ -1666,8 +1722,10 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
   try {
     const url = config.protocol === CoworkModelProtocol.GeminiNative
       ? buildGeminiGenerateContentUrl(config.baseURL, config.model)
+      : config.protocol === CoworkModelProtocol.OpenAICompat
+        ? buildOpenAIChatCompletionsUrl(config.baseURL)
       : buildAnthropicMessagesUrl(config.baseURL);
-    const prompt = `Generate a short title from this input, keep the same language, return plain text only (no markdown), and keep it within ${SESSION_TITLE_MAX_CHARS} characters: ${normalizedInput}`;
+    const prompt = `Return one plain-text title in the same language, max ${SESSION_TITLE_MAX_CHARS} chars: ${normalizedInput}`;
     console.log(`[cowork-title] Generating title: protocol=${config.protocol}, baseURL=${config.baseURL}, requestUrl=${url}, model=${config.model}`);
 
     const response = await fetch(url, {
@@ -1677,6 +1735,11 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
             'Content-Type': 'application/json',
             'x-goog-api-key': config.apiKey,
           }
+        : config.protocol === CoworkModelProtocol.OpenAICompat
+          ? {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${config.apiKey}`,
+            }
         : {
             'Content-Type': 'application/json',
             'x-api-key': config.apiKey,
@@ -1691,6 +1754,15 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
                 temperature: 0,
               },
             }
+          : config.protocol === CoworkModelProtocol.OpenAICompat
+            ? {
+                model: config.model,
+                messages: [{ role: 'user', content: prompt }],
+                // Reasoning models may spend hidden tokens before emitting text.
+                max_tokens: 128,
+                temperature: 0,
+                stream: false,
+              }
           : {
               model: config.model,
               max_tokens: 80,
@@ -1715,6 +1787,8 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
     console.log(`[cowork-title] Title response payload:`, JSON.stringify(payload).slice(0, 500));
     const llmTitle = config.protocol === CoworkModelProtocol.GeminiNative
       ? extractTextFromGeminiResponse(payload)
+      : config.protocol === CoworkModelProtocol.OpenAICompat
+        ? extractTextFromOpenAIChatCompletionResponse(payload)
       : extractTextFromAnthropicResponse(payload);
     console.log(`[cowork-title] Extracted title text: "${llmTitle}"`);
     return normalizeTitleToPlainText(llmTitle, fallbackTitle);

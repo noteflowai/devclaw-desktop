@@ -166,7 +166,13 @@ export const checkForAppUpdate = async (currentVersion: string, manual?: boolean
     headers: {
       Accept: 'application/json',
     },
+    expectedStatuses: [404],
   });
+
+  if (response.status === 404) {
+    console.log('[AppUpdate] no release endpoint available, treating as no update');
+    return null;
+  }
 
   if (!response.ok || typeof response.data !== 'object' || response.data === null) {
     console.log(`[AppUpdate] request failed: status=${response.status}, statusText=${response.statusText}`);

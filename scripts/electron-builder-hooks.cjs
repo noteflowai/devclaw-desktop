@@ -488,6 +488,17 @@ async function beforePack(context) {
   installSkillDependencies();
 
   if (isWindowsTarget(context)) {
+    console.log('[electron-builder-hooks] Windows target detected, ensuring portable Python runtime is prepared...');
+    await ensurePortablePythonRuntime({ required: true });
+    const runtimeRoot = path.join(__dirname, '..', 'resources', 'python-win');
+    const runtimeHealth = checkRuntimeHealth(runtimeRoot, { requirePip: true });
+    if (!runtimeHealth.ok) {
+      throw new Error(
+        'Portable Python runtime health check failed before pack. Missing files: '
+        + runtimeHealth.missing.join(', ')
+      );
+    }
+
     // Pack all large resource directories into a single tar for faster NSIS
     // installation.  NSIS extracts thousands of small files very slowly on NTFS;
     // a single tar archive is extracted by 7z almost instantly, and we unpack
@@ -527,23 +538,12 @@ async function beforePack(context) {
       `[electron-builder-hooks] Combined tar packed in ${elapsed}s: `
       + `${totalFiles} files, ${skipped} skipped, ${sizeMB} MB`
     );
+    return;
   }
 
   if (!isWindowsTarget(context)) {
     return;
   }
-
-  console.log('[electron-builder-hooks] Windows target detected, ensuring portable Python runtime is prepared...');
-  await ensurePortablePythonRuntime({ required: true });
-  const runtimeRoot = path.join(__dirname, '..', 'resources', 'python-win');
-  const runtimeHealth = checkRuntimeHealth(runtimeRoot, { requirePip: true });
-  if (!runtimeHealth.ok) {
-    throw new Error(
-      'Portable Python runtime health check failed before pack. Missing files: '
-      + runtimeHealth.missing.join(', ')
-    );
-  }
-
 }
 
 async function afterPack(context) {

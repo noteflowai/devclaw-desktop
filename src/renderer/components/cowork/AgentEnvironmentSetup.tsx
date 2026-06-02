@@ -153,7 +153,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
   const [notice, setNotice] = useState<string | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
 
-  const isMacOS = window.electron?.platform === 'darwin';
+  const isSupportedInstallPlatform = window.electron?.platform === 'darwin' || window.electron?.platform === 'win32';
   const effectiveSelectedEngine = findTargetByEngine(selectedEngine)
     ? selectedEngine
     : DefaultCoworkAgentEngine;
@@ -214,7 +214,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
   };
 
   const installOne = async (appType: ExternalAgentProviderAppType): Promise<boolean> => {
-    if (!isMacOS) {
+    if (!isSupportedInstallPlatform) {
       setError(i18nService.t('coworkAgentEngineInstallCliUnsupported'));
       return false;
     }
@@ -367,7 +367,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
 
         {!found && (
           <div className="mt-3" onClick={(event) => event.stopPropagation()}>
-            {isMacOS ? (
+            {isSupportedInstallPlatform ? (
               <button
                 type="button"
                 onClick={() => void installOne(target.appType)}
@@ -439,7 +439,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
             <button
               type="button"
               onClick={() => void handleInstallRecommended()}
-              disabled={!isMacOS || Boolean(installingAppType) || missingRecommendedAppTypes.length === 0}
+              disabled={!isSupportedInstallPlatform || Boolean(installingAppType) || missingRecommendedAppTypes.length === 0}
               className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {i18nService.t(missingRecommendedAppTypes.length === 0 ? 'agentSetupRecommendedReady' : 'agentSetupInstallRecommended')}

@@ -157,6 +157,57 @@ const truncateProgressLine = (value: string): string => {
 
 const buildInstallScript = (target: InstallTarget): string => {
   const method = target.methods[0];
+  const isWindows = process.platform === 'win32';
+
+  if (isWindows) {
+    if (method.id === 'npm') {
+      return [
+        '$OutputEncoding = [System.Text.Encoding]::UTF8',
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        '$npmPath = (Get-Command npm -ErrorAction SilentlyContinue).Source',
+        'if (-not $npmPath) {',
+        '  Write-Host "npm not found, please install Node.js first"',
+        '  exit 1',
+        '}',
+        `Write-Host "__WESIGHT_INSTALL_METHOD__=${method.id}"`,
+        `npm install -g ${method.packageName ?? ''}`,
+        `$cmdPath = (Get-Command ${target.command} -ErrorAction SilentlyContinue).Source`,
+        'if (-not $cmdPath) {',
+        `  Write-Host "${target.command} command was not found after installation."`,
+        '  exit 127',
+        '}',
+        'Write-Host "__WESIGHT_BINARY_PATH__=$cmdPath"',
+        '$version = & $cmdPath --version 2>&1 | Select-Object -First 1',
+        'Write-Host "__WESIGHT_VERSION__=$version"',
+      ].join('\r\n');
+    }
+
+    if (target.appType === 'hermes' && method.id === 'official-installer') {
+      return [
+        '$installDir = "$env:USERPROFILE\\.hermes"',
+        'if (-not (Test-Path $installDir)) { New-Item -ItemType Directory -Path $installDir -Force | Out-Null }',
+        '$zipUrl = "https://github.com/NousResearch/hermes-agent/releases/latest/download/hermes-agent-windows-x64.zip"',
+        '$zipPath = "$installDir\\hermes.zip"',
+        'Write-Host "Downloading Hermes Agent..."',
+        'Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing',
+        'Write-Host "Extracting..."',
+        'Expand-Archive -Path $zipPath -DestinationPath $installDir -Force',
+        'Remove-Item $zipPath -Force -ErrorAction SilentlyContinue',
+        '$hermesExe = "$installDir\\hermes.exe"',
+        'if (-not (Test-Path $hermesExe)) {',
+        '  Write-Host "Hermes installation failed"',
+        '  exit 1',
+        '}',
+        `Write-Host "__WESIGHT_INSTALL_METHOD__=${method.id}"`,
+        'Write-Host "__WESIGHT_BINARY_PATH__=$hermesExe"',
+        '$version = & $hermesExe --version 2>&1 | Select-Object -First 1',
+        'Write-Host "__WESIGHT_VERSION__=$version"',
+      ].join('\r\n');
+    }
+
+    throw new Error(`Automatic installation is not available for ${target.displayName} on Windows.`);
+  }
+
   if (method.id === 'official-installer') {
     const scriptUrl = method.scriptUrl;
     if (!scriptUrl) {
@@ -252,8 +303,10 @@ export class ExternalAgentCliInstaller extends EventEmitter {
 
   private async runInstall(appType: CliAppType): Promise<ExternalAgentCliInstallResult> {
     const target = INSTALL_TARGETS[appType];
-    if (process.platform !== 'darwin') {
-      const message = 'Automatic CLI installation currently supports macOS only.';
+    const isWindows = process.platform === 'win32';
+    const isMacOS = process.platform === 'darwin';
+    if (!isWindows && !isMacOS) {
+      const message = 'Automatic CLI installation currently supports macOS and Windows only.';
       this.emitProgress({
         appType,
         phase: 'unsupported',
@@ -268,8 +321,26 @@ export class ExternalAgentCliInstaller extends EventEmitter {
       };
     }
 
-    const shell = process.env.SHELL || '/bin/zsh';
-    const script = buildInstallScript(target);
+    const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/zsh');
+    const shellArgs = isWindows ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command'] : ['-lc'];
+    let script: string;
+    try {
+      script = buildInstallScript(target);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitProgress({
+        appType,
+        phase: 'unsupported',
+        message,
+      });
+      return {
+        success: false,
+        appType,
+        unsupported: true,
+        error: message,
+        snapshot: getExternalAgentEnvironmentSnapshot(),
+      };
+    }
     const startedAt = Date.now();
     let stdout = '';
     let stderr = '';
@@ -284,12 +355,14 @@ export class ExternalAgentCliInstaller extends EventEmitter {
     });
 
     return new Promise<ExternalAgentCliInstallResult>((resolve) => {
-      const child = spawn(shell, ['-lc', script], {
+      const child = spawn(shell, [...shellArgs, script], {
         cwd: os.homedir(),
         env: {
           ...process.env,
           HOMEBREW_NO_ENV_HINTS: '1',
-          PATH: `${os.homedir()}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
+          PATH: isWindows
+            ? (process.env.PATH ?? '')
+            : `${os.homedir()}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });

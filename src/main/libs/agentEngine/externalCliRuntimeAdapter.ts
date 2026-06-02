@@ -87,6 +87,7 @@ type ActiveCliSession = {
   noContentNoticeTimer: ReturnType<typeof setTimeout> | null;
   noContentTimeoutTimer: ReturnType<typeof setTimeout> | null;
   imagePaths: string[];
+  codexHomeDir: string | null;
   localClaudeConfig: LocalClaudeCodeEnvLoadResult | null;
   codexGeneratedImageIds: Set<string>;
 };
@@ -192,6 +193,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       this.clearSessionTimers(active);
       active.child.kill('SIGTERM');
       this.cleanupImagePaths(active.imagePaths);
+      this.cleanupCodexHomeDir(active.codexHomeDir);
       this.activeSessions.delete(sessionId);
     }
     this.store.updateSession(sessionId, { status: 'idle' });
@@ -285,6 +287,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       this.applyQwenCodeRuntimeConfig(env, apiConfigOverride);
     }
     const command = this.getCommandName();
+    const codexHomeDir = this.prepareCodexProviderHomeForExecMode(env, selectedProvider);
     const args = this.buildCommandArgs(
       cwd,
       effectivePrompt,
@@ -317,6 +320,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       noContentNoticeTimer: null,
       noContentTimeoutTimer: null,
       imagePaths,
+      codexHomeDir,
       localClaudeConfig,
       codexGeneratedImageIds: new Set(),
     };
@@ -352,6 +356,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
         spawnFailed = true;
         this.clearSessionTimers(active);
         this.cleanupImagePaths(active.imagePaths);
+        this.cleanupCodexHomeDir(active.codexHomeDir);
         this.activeSessions.delete(sessionId);
         this.handleError(sessionId, `${this.getEngineDisplayName()} failed to start: ${error.message}`);
         resolve();
@@ -366,6 +371,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
         this.clearSessionTimers(active);
         this.finalizeAssistant(active);
         this.cleanupImagePaths(active.imagePaths);
+        this.cleanupCodexHomeDir(active.codexHomeDir);
         this.activeSessions.delete(sessionId);
 
         if (this.stoppedSessions.has(sessionId)) {
@@ -664,6 +670,54 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     const apiKey = this.getString(auth.OPENAI_API_KEY);
     if (apiKey) {
       env.OPENAI_API_KEY = apiKey;
+    }
+  }
+
+  private prepareCodexProviderHomeForExecMode(
+    env: Record<string, string | undefined>,
+    provider: ExternalAgentProvider | null,
+  ): string | null {
+    if (this.engine !== CoworkAgentEngine.Codex) return null;
+    if (this.getConfigSource() !== ExternalAgentConfigSource.LocalCli) return null;
+    if (!provider || provider.appType !== 'codex') return null;
+
+    const auth = this.getNestedRecord(provider.settingsConfig, 'auth');
+    const apiKey = this.getString(auth.OPENAI_API_KEY);
+    const configText = this.getString(provider.settingsConfig.config);
+    if (!apiKey || !configText) return null;
+
+    try {
+      const codexHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wesight-codex-home-'));
+      fs.writeFileSync(path.join(codexHomeDir, 'auth.json'), `${JSON.stringify({ OPENAI_API_KEY: apiKey }, null, 2)}\n`, 'utf8');
+      fs.writeFileSync(path.join(codexHomeDir, 'config.toml'), this.overrideCodexConfigModel(configText, provider.summary.model), 'utf8');
+      env.CODEX_HOME = codexHomeDir;
+      return codexHomeDir;
+    } catch (error) {
+      console.warn('[ExternalCliRuntimeAdapter] Failed to prepare temporary Codex provider config:', error);
+      return null;
+    }
+  }
+
+  private overrideCodexConfigModel(configText: string, model: string): string {
+    const normalizedModel = model.trim();
+    if (!normalizedModel) return configText;
+    const modelLine = `model = ${this.tomlString(normalizedModel)}`;
+    if (/^\s*model\s*=.*$/m.test(configText)) {
+      return configText.replace(/^\s*model\s*=.*$/m, modelLine);
+    }
+    return `${modelLine}\n${configText}`;
+  }
+
+  private cleanupCodexHomeDir(codexHomeDir: string | null): void {
+    if (!codexHomeDir) return;
+    const tmpRoot = path.resolve(os.tmpdir());
+    const resolved = path.resolve(codexHomeDir);
+    if (!resolved.startsWith(tmpRoot + path.sep)) return;
+    if (!path.basename(resolved).startsWith('wesight-codex-home-')) return;
+    try {
+      fs.rmSync(resolved, { recursive: true, force: true });
+    } catch {
+      // Temporary Codex config cleanup is best effort.
     }
   }
 
