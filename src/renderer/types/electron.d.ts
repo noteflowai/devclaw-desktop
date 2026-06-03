@@ -142,6 +142,7 @@ type CoworkConfigUpdate = Partial<Pick<
 >>;
 
 type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
+type CliAuthStatus = 'unknown' | 'logged_out' | 'logged_in' | 'expired' | 'unconfigured';
 
 interface CliAppConfigSnapshot {
   appType: CliAppType;
@@ -162,6 +163,9 @@ interface CliCommandStatus {
   path: string | null;
   version: string | null;
   error: string | null;
+  authStatus: CliAuthStatus;
+  authSource: string | null;
+  authMessage: string | null;
   checking?: boolean;
   config: CliAppConfigSnapshot;
 }

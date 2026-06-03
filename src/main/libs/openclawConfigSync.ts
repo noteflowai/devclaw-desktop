@@ -93,6 +93,12 @@ const ensureDir = (dirPath: string): void => {
   }
 };
 
+const asRecord = (value: unknown): Record<string, unknown> => {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+};
+
 const normalizeModelName = (modelId: string): string => {
   const trimmed = modelId.trim();
   if (!trimmed) return 'default-model';
@@ -1502,6 +1508,19 @@ export class OpenClawConfigSync {
       existingConfigForMerge = {};
     }
 
+    const existingModels = asRecord(existingConfigForMerge.models);
+    const nextModels = asRecord(managedConfig.models);
+    const existingProviders = asRecord(existingModels.providers);
+    const nextProviders = asRecord(nextModels.providers);
+    managedConfig.models = {
+      ...existingModels,
+      ...nextModels,
+      providers: {
+        ...existingProviders,
+        ...nextProviders,
+      },
+    };
+
     const existingChannels = existingConfigForMerge.channels && typeof existingConfigForMerge.channels === 'object' && !Array.isArray(existingConfigForMerge.channels)
       ? existingConfigForMerge.channels as Record<string, unknown>
       : {};
@@ -1729,9 +1748,8 @@ export class OpenClawConfigSync {
   }
 
   /**
-   * Ensures ~/.openclaw/exec-approvals.json has security=full + ask=off
-   * so the gateway never triggers approval-pending for any command.
-   * Delete-command protection is handled via the system prompt instead.
+   * Bootstrap ~/.openclaw/exec-approvals.json only when the user has no
+   * main-agent approval policy yet. Existing user policies are preserved.
    */
   private ensureExecApprovalDefaults(): void {
     const filePath = path.join(app.getPath('home'), '.openclaw', 'exec-approvals.json');
@@ -1752,10 +1770,9 @@ export class OpenClawConfigSync {
     }
 
     if (!file.agents) file.agents = {};
-    if (!file.agents.main) file.agents.main = {};
+    if (file.agents.main) return;
+    file.agents.main = {};
     const agent = file.agents.main;
-
-    if (agent.security === 'full' && agent.ask === 'off') return;
 
     agent.security = 'full';
     agent.ask = 'off';
@@ -1766,7 +1783,7 @@ export class OpenClawConfigSync {
         fs.mkdirSync(dir, { recursive: true });
       }
       this.atomicWriteFile(filePath, `${JSON.stringify(file, null, 2)}\n`);
-      console.log('[OpenClawConfigSync] set exec-approvals security=full ask=off');
+      console.log('[OpenClawConfigSync] bootstrapped exec-approvals for main agent');
     } catch (error) {
       console.warn('[OpenClawConfigSync] failed to write exec-approvals.json:', error);
     }

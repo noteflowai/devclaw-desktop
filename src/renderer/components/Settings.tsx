@@ -3031,6 +3031,53 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     return agentEnvironmentSnapshot?.engines.find((item) => item.engine === engine) ?? null;
   };
 
+  const getCliAuthMeta = (status: NonNullable<ExternalAgentEnvironmentSnapshot['engines'][number]>) => {
+    switch (status.authStatus) {
+      case 'logged_in':
+        return {
+          label: i18nService.t('coworkAgentEngineAuthStatusLoggedIn'),
+          tone: 'text-green-600 dark:text-green-400',
+          dot: 'bg-green-500',
+        };
+      case 'expired':
+        return {
+          label: i18nService.t('coworkAgentEngineAuthStatusExpired'),
+          tone: 'text-amber-600 dark:text-amber-400',
+          dot: 'bg-amber-500',
+        };
+      case 'logged_out':
+        return {
+          label: i18nService.t('coworkAgentEngineAuthStatusLoggedOut'),
+          tone: 'text-amber-600 dark:text-amber-400',
+          dot: 'bg-amber-500',
+        };
+      case 'unconfigured':
+        return {
+          label: i18nService.t('coworkAgentEngineAuthStatusUnconfigured'),
+          tone: 'text-red-600 dark:text-red-400',
+          dot: 'bg-red-500',
+        };
+      case 'unknown':
+      default:
+        return {
+          label: i18nService.t('coworkAgentEngineAuthStatusUnknown'),
+          tone: 'text-secondary',
+          dot: 'bg-secondary',
+        };
+    }
+  };
+
+  const formatCliAuthSource = (status: NonNullable<ExternalAgentEnvironmentSnapshot['engines'][number]>): string => {
+    if (!status.authSource) return '';
+    if (status.authMessage === 'env') {
+      return `${i18nService.t('coworkAgentEngineAuthSourceEnv')} · ${status.authSource}`;
+    }
+    if (status.authMessage === 'file') {
+      return `${i18nService.t('coworkAgentEngineAuthSourceFile')} · ${status.authSource}`;
+    }
+    return status.authSource;
+  };
+
   const refreshAgentEnvironmentSnapshot = async (options: { forceRefresh?: boolean } = {}) => {
     const snapshot = await coworkService.getAgentEngineSnapshot(options);
     setAgentEnvironmentSnapshot(snapshot);
@@ -3165,6 +3212,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     const isInstalling = agentCliInstallingAppType === cliStatus.appType;
     const installProgress = agentCliInstallProgress[cliStatus.appType];
     const isChecking = cliStatus.checking === true;
+    const authMeta = getCliAuthMeta(cliStatus);
+    const authSource = formatCliAuthSource(cliStatus);
 
     const rows = [
       {
@@ -3220,6 +3269,20 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
             {installProgress}
           </div>
         )}
+        <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-2 text-[11px] leading-5">
+          <span className="text-secondary">{i18nService.t('coworkAgentEngineAuthTitle')}</span>
+          <span className="min-w-0">
+            <span className={`inline-flex max-w-full items-center gap-1.5 truncate ${authMeta.tone}`} title={authSource || authMeta.label}>
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${authMeta.dot}`} />
+              <span className="truncate">{authMeta.label}</span>
+            </span>
+            {authSource && (
+              <span className="ml-1 text-secondary" title={authSource}>
+                · {authSource}
+              </span>
+            )}
+          </span>
+        </div>
         {rows.map((row) => (
           <div key={row.label} className="grid grid-cols-[96px_minmax(0,1fr)] gap-2 text-[11px] leading-5">
             <span className="text-secondary">{row.label}</span>

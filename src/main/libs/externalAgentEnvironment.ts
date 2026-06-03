@@ -25,6 +25,7 @@ import {
 import { readOpenClawGlobalConfig, summarizeOpenClawConfig } from './openclawSystemRuntime';
 
 export type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
+export type CliAuthStatus = 'unknown' | 'logged_out' | 'logged_in' | 'expired' | 'unconfigured';
 
 export interface CliAppConfigSnapshot {
   appType: CliAppType;
@@ -45,6 +46,9 @@ export interface CliCommandStatus {
   path: string | null;
   version: string | null;
   error: string | null;
+  authStatus: CliAuthStatus;
+  authSource: string | null;
+  authMessage: string | null;
   checking?: boolean;
   config: CliAppConfigSnapshot;
 }
@@ -114,6 +118,72 @@ const readJsonObject = (filePath: string): Record<string, unknown> | null => {
   } catch {
     return null;
   }
+};
+
+const isNonPlaceholderSecret = (value: unknown): boolean => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const normalized = trimmed.toLowerCase();
+  if (trimmed.startsWith('${') || trimmed.startsWith('$')) return false;
+  if (trimmed.includes('WESIGHT_APIKEY_') || trimmed.includes('WESIGHT_APIKEY_ACTIVE_PROVIDER')) return false;
+  if (['***', 'sk-wesight-local', 'wesight-openai-compat', 'qwen-oauth'].includes(normalized)) return false;
+  return true;
+};
+
+const isCredentialLikeKey = (key: string): boolean => {
+  const normalized = key.toLowerCase();
+  return normalized.includes('api_key')
+    || normalized.includes('apikey')
+    || normalized.includes('api-key')
+    || normalized.includes('auth_token')
+    || normalized.includes('access_token')
+    || normalized.includes('refresh_token')
+    || normalized.includes('id_token')
+    || normalized === 'token'
+    || normalized.includes('credential')
+    || normalized.includes('secret');
+};
+
+const recordContainsCredential = (value: unknown, parentKey = ''): boolean => {
+  if (typeof value === 'string') {
+    return isCredentialLikeKey(parentKey) && isNonPlaceholderSecret(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => recordContainsCredential(item, parentKey));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return Object.entries(value as Record<string, unknown>).some(([key, item]) => (
+    recordContainsCredential(item, key)
+  ));
+};
+
+const fileContainsCredential = (filePath: string): boolean => {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const content = fs.readFileSync(filePath, 'utf8');
+    if (!content.trim()) return false;
+    try {
+      return recordContainsCredential(JSON.parse(content));
+    } catch {
+      const credentialLinePattern = /(?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|credential|token)\s*[:=]\s*["']?([^"'\n#]+)/i;
+      const match = content.match(credentialLinePattern);
+      return isNonPlaceholderSecret(match?.[1]);
+    }
+  } catch {
+    return false;
+  }
+};
+
+const envContainsCredential = (keys: string[]): string | null => {
+  for (const key of keys) {
+    if (isNonPlaceholderSecret(process.env[key])) {
+      return key;
+    }
+  }
+  return null;
 };
 
 const readCcSwitchSettings = (settingsPath: string): CcSwitchSettings => {
@@ -288,6 +358,109 @@ const readOpenClawConfigSummary = (
     providerId: model?.includes('/') ? model.split('/')[0] : model,
     providerName: model,
     count: model ? 1 : 0,
+  };
+};
+
+interface CliAuthSummary {
+  authStatus: CliAuthStatus;
+  authSource: string | null;
+  authMessage: string | null;
+}
+
+const localEnvKeysByAppType: Record<CliAppType, string[]> = {
+  claude: ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'],
+  codex: ['OPENAI_API_KEY'],
+  hermes: ['HERMES_INFERENCE_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GLM_API_KEY', 'ZAI_API_KEY', 'Z_AI_API_KEY'],
+  openclaw: ['OPENCLAW_GATEWAY_TOKEN', 'OPENAI_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'],
+  opencode: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'],
+  grok: ['GROK_API_KEY', 'XAI_API_KEY', 'X_AI_API_KEY'],
+  qwen: ['DASHSCOPE_API_KEY', 'QWEN_API_KEY'],
+  deepseek_tui: ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY'],
+};
+
+const formatAuthSource = (filePath: string): string => (
+  filePath.startsWith(homeDir())
+    ? `~${filePath.slice(homeDir().length)}`
+    : filePath
+);
+
+const buildAuthPathCandidates = (
+  appType: CliAppType,
+  configDir: string,
+  primaryConfigPath: string,
+  secondaryConfigPaths: string[],
+): string[] => {
+  const common = [primaryConfigPath, ...secondaryConfigPaths];
+  if (appType === 'claude') {
+    return [
+      ...common,
+      path.join(configDir, '.credentials.json'),
+      path.join(configDir, 'credentials.json'),
+      path.join(configDir, 'oauth.json'),
+    ];
+  }
+  if (appType === 'codex') {
+    return [
+      ...common,
+      path.join(configDir, 'auth.json'),
+    ];
+  }
+  if (appType === 'opencode') {
+    return [
+      ...common,
+      path.join(getOpenCodeDataDir(), 'auth.json'),
+    ];
+  }
+  if (appType === 'qwen') {
+    return [
+      ...common,
+      path.join(configDir, 'oauth_creds.json'),
+    ];
+  }
+  return common;
+};
+
+export const summarizeCliAuthStatus = (
+  appType: CliAppType,
+  config: Pick<CliAppConfigSnapshot, 'configDir' | 'primaryConfigPath' | 'secondaryConfigPaths' | 'configExists' | 'currentProviderId' | 'currentProviderName' | 'providerCount'>,
+): CliAuthSummary => {
+  const envKey = envContainsCredential(localEnvKeysByAppType[appType] ?? []);
+  if (envKey) {
+    return {
+      authStatus: 'logged_in',
+      authSource: envKey,
+      authMessage: 'env',
+    };
+  }
+
+  const candidates = buildAuthPathCandidates(
+    appType,
+    config.configDir,
+    config.primaryConfigPath,
+    config.secondaryConfigPaths,
+  );
+  const credentialPath = candidates.find((filePath) => fileContainsCredential(filePath));
+  if (credentialPath) {
+    return {
+      authStatus: 'logged_in',
+      authSource: formatAuthSource(credentialPath),
+      authMessage: 'file',
+    };
+  }
+
+  const anyConfigFileExists = config.configExists || config.secondaryConfigPaths.some((filePath) => fs.existsSync(filePath));
+  if (!anyConfigFileExists && !config.currentProviderId && config.providerCount === 0) {
+    return {
+      authStatus: 'unconfigured',
+      authSource: null,
+      authMessage: null,
+    };
+  }
+
+  return {
+    authStatus: 'logged_out',
+    authSource: null,
+    authMessage: config.currentProviderName ?? config.currentProviderId ?? null,
   };
 };
 
@@ -732,6 +905,7 @@ const buildCommandStatus = (
       ? await readCommandVersion(resolution.path ?? command)
       : { version: null, durationMs: 0, timedOut: false };
     const config = buildCliConfigSnapshot(appType, settings, dbPath);
+    const auth = summarizeCliAuthStatus(appType, config);
     return {
       status: {
         engine,
@@ -741,6 +915,7 @@ const buildCommandStatus = (
         path: resolution.path,
         version: versionResult.version,
         error: resolution.error,
+        ...auth,
         config,
       },
       metric: {
@@ -769,6 +944,9 @@ const buildPlaceholderCommandStatus = (
   path: null,
   version: null,
   error: null,
+  authStatus: 'unknown',
+  authSource: null,
+  authMessage: null,
   checking: true,
   config: buildCliConfigSnapshot(appType, settings, dbPath),
 });

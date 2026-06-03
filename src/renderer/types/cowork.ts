@@ -291,6 +291,7 @@ export interface CoworkConfigResult {
 }
 
 export type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
+export type CliAuthStatus = 'unknown' | 'logged_out' | 'logged_in' | 'expired' | 'unconfigured';
 
 export interface CliAppConfigSnapshot {
   appType: CliAppType;
@@ -311,6 +312,9 @@ export interface CliCommandStatus {
   path: string | null;
   version: string | null;
   error: string | null;
+  authStatus: CliAuthStatus;
+  authSource: string | null;
+  authMessage: string | null;
   checking?: boolean;
   config: CliAppConfigSnapshot;
 }

@@ -81,11 +81,51 @@ const ENGINE_OPTIONS: Array<{
 
 const isCliEngine = (engine: CoworkAgentEngineType): boolean => {
   return engine === CoworkAgentEngine.ClaudeCode
+    || engine === CoworkAgentEngine.OpenClaw
     || engine === CoworkAgentEngine.Codex
+    || engine === CoworkAgentEngine.Hermes
     || engine === CoworkAgentEngine.OpenCode
     || engine === CoworkAgentEngine.GrokBuild
     || engine === CoworkAgentEngine.QwenCode
     || engine === CoworkAgentEngine.DeepSeekTui;
+};
+
+type CliEngineStatus = ExternalAgentEnvironmentSnapshot['engines'][number];
+
+const resolveAuthMeta = (status: CliEngineStatus): { labelKey: string; dotClass: string; textClass: string } => {
+  switch (status.authStatus) {
+    case 'logged_in':
+      return {
+        labelKey: 'coworkAgentEngineAuthStatusLoggedIn',
+        dotClass: 'bg-green-500',
+        textClass: 'text-green-600 dark:text-green-400',
+      };
+    case 'expired':
+      return {
+        labelKey: 'coworkAgentEngineAuthStatusExpired',
+        dotClass: 'bg-amber-500',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    case 'logged_out':
+      return {
+        labelKey: 'coworkAgentEngineAuthStatusLoggedOut',
+        dotClass: 'bg-amber-500',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    case 'unconfigured':
+      return {
+        labelKey: 'coworkAgentEngineAuthStatusUnconfigured',
+        dotClass: 'bg-red-500',
+        textClass: 'text-red-600 dark:text-red-400',
+      };
+    case 'unknown':
+    default:
+      return {
+        labelKey: 'coworkAgentEngineAuthStatusUnknown',
+        dotClass: 'bg-primary animate-pulse',
+        textClass: 'text-primary',
+      };
+  }
 };
 
 const CoworkEngineSelector: React.FC<CoworkEngineSelectorProps> = ({
@@ -188,11 +228,22 @@ const CoworkEngineSelector: React.FC<CoworkEngineSelectorProps> = ({
     }
     const status = getCliStatus(engine);
     if (!isCliEngine(engine) || !status) return null;
+    if (!status.found) {
+      return (
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <span className="truncate">
+            {i18nService.t(status.checking ? 'coworkAgentEngineCliChecking' : 'coworkAgentEngineCliMissing')}
+          </span>
+        </div>
+      );
+    }
+    const authMeta = resolveAuthMeta(status);
     return (
-      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-secondary">
-        <span className={`h-1.5 w-1.5 rounded-full ${status.found ? 'bg-green-500' : 'bg-amber-500'}`} />
-        <span className="truncate">
-          {i18nService.t(status.found ? 'coworkAgentEngineCliInstalled' : 'coworkAgentEngineCliMissing')}
+      <div className={`mt-1 flex items-center gap-1.5 text-[11px] ${authMeta.textClass}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${authMeta.dotClass}`} />
+        <span className="truncate" title={status.authSource || status.version || undefined}>
+          {i18nService.t(authMeta.labelKey)}
           {status.version ? ` · ${status.version}` : ''}
         </span>
       </div>

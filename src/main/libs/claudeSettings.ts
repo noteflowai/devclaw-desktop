@@ -536,10 +536,22 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
 export function buildEnvForConfig(config: CoworkApiConfig): Record<string, string> {
   const baseEnv = { ...process.env } as Record<string, string>;
 
+  baseEnv.WESIGHT_APIKEY_ACTIVE_PROVIDER = config.apiKey;
+  baseEnv.LOBSTER_PROVIDER_API_KEY = config.apiKey;
+
   baseEnv.ANTHROPIC_AUTH_TOKEN = config.apiKey;
   baseEnv.ANTHROPIC_API_KEY = config.apiKey;
   baseEnv.ANTHROPIC_BASE_URL = config.baseURL;
   baseEnv.ANTHROPIC_MODEL = config.model;
+  baseEnv.ANTHROPIC_REASONING_MODEL = config.model;
+  baseEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = config.model;
+  baseEnv.ANTHROPIC_DEFAULT_OPUS_MODEL = config.model;
+  baseEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = config.model;
+  baseEnv.ANTHROPIC_SMALL_FAST_MODEL = config.model;
+
+  baseEnv.OPENAI_API_KEY = config.apiKey;
+  baseEnv.OPENAI_BASE_URL = config.baseURL;
+  baseEnv.OPENAI_MODEL = config.model;
   return baseEnv;
 }
 

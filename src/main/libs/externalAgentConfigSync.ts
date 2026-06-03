@@ -113,6 +113,9 @@ const DEFAULT_GROK_LOCAL_MODEL = DEFAULT_GROK_BUILD_MODEL;
 const DEFAULT_QWEN_CODE_LOCAL_MODEL = DEFAULT_QWEN_CODE_MODEL;
 const DEFAULT_DEEPSEEK_TUI_LOCAL_MODEL = DEFAULT_DEEPSEEK_TUI_MODEL;
 const CC_SWITCH_CLAUDE_COMMON_CONFIG_KEY = 'common_config_claude';
+const WESIGHT_MANAGED_META_KEY = '__wesight_managed';
+const WESIGHT_ACTIVE_API_KEY_ENV = 'WESIGHT_APIKEY_ACTIVE_PROVIDER';
+const WESIGHT_ACTIVE_API_KEY_PLACEHOLDER = `\${${WESIGHT_ACTIVE_API_KEY_ENV}}`;
 const CLAUDE_MODEL_ENV_KEYS = [
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_API_KEY',
@@ -217,7 +220,7 @@ const sanitizeProviderKey = (value: string): string => {
   return key || 'wesight';
 };
 
-const buildCodexConfig = (providerName: string, baseUrl: string, model: string): string => {
+export const buildCodexConfig = (providerName: string, baseUrl: string, model: string): string => {
   const providerKey = sanitizeProviderKey(providerName);
   return [
     `model_provider = ${tomlString(providerKey)}`,
@@ -232,6 +235,89 @@ const buildCodexConfig = (providerName: string, baseUrl: string, model: string):
     'requires_openai_auth = true',
     '',
   ].filter((line) => line !== '').join('\n');
+};
+
+const isWesightPlaceholder = (value: unknown): boolean => {
+  return typeof value === 'string'
+    && /^\$\{(?:WESIGHT|LOBSTER)_[A-Z0-9_]+\}$/.test(value.trim());
+};
+
+const removeTrailingBlankLines = (value: string): string => {
+  return value.replace(/\s+$/g, '');
+};
+
+const splitTomlHeadAndTables = (configText: string): { head: string; tables: string } => {
+  const match = configText.match(/^\s*\[/m);
+  if (!match || match.index === undefined) {
+    return { head: configText, tables: '' };
+  }
+  return {
+    head: configText.slice(0, match.index),
+    tables: configText.slice(match.index),
+  };
+};
+
+const upsertTomlTopLevelString = (head: string, key: string, value: string): string => {
+  const line = `${key} = ${tomlString(value)}`;
+  const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, 'm');
+  if (pattern.test(head)) {
+    return head.replace(pattern, line);
+  }
+  const trimmed = removeTrailingBlankLines(head);
+  return trimmed ? `${trimmed}\n${line}\n` : `${line}\n`;
+};
+
+const upsertTomlTopLevelBoolean = (head: string, key: string, value: boolean): string => {
+  const line = `${key} = ${value ? 'true' : 'false'}`;
+  const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, 'm');
+  if (pattern.test(head)) {
+    return head.replace(pattern, line);
+  }
+  const trimmed = removeTrailingBlankLines(head);
+  return trimmed ? `${trimmed}\n${line}\n` : `${line}\n`;
+};
+
+const replaceCodexProviderTable = (
+  tables: string,
+  providerKey: string,
+  providerName: string,
+  baseUrl: string,
+): string => {
+  const escaped = providerKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const providerBlock = [
+    `[model_providers.${providerKey}]`,
+    `name = ${tomlString(providerName || providerKey)}`,
+    baseUrl.trim() ? `base_url = ${tomlString(baseUrl.trim())}` : '',
+    'wire_api = "responses"',
+    'requires_openai_auth = true',
+    '',
+  ].filter((line) => line !== '').join('\n');
+  const tablePattern = new RegExp(
+    `(^|\\n)\\[model_providers\\.${escaped}\\][\\s\\S]*?(?=\\n\\[|$)`,
+    'm',
+  );
+  if (tablePattern.test(tables)) {
+    return tables.replace(tablePattern, (match, prefix) => `${prefix}${providerBlock}`);
+  }
+  const trimmed = removeTrailingBlankLines(tables);
+  return trimmed ? `${trimmed}\n\n${providerBlock}\n` : `${providerBlock}\n`;
+};
+
+export const mergeCodexConfigForWesightModel = (
+  existingText: string,
+  providerName: string,
+  baseUrl: string,
+  model: string,
+): string => {
+  const providerKey = sanitizeProviderKey(providerName);
+  const split = splitTomlHeadAndTables(existingText);
+  let head = split.head;
+  head = upsertTomlTopLevelString(head, 'model_provider', providerKey);
+  head = upsertTomlTopLevelString(head, 'model', model || DEFAULT_CODEX_MODEL);
+  head = upsertTomlTopLevelString(head, 'model_reasoning_effort', 'high');
+  head = upsertTomlTopLevelBoolean(head, 'disable_response_storage', true);
+  const tables = replaceCodexProviderTable(split.tables, providerKey, providerName, baseUrl);
+  return `${removeTrailingBlankLines(head)}\n\n${removeTrailingBlankLines(tables)}\n`;
 };
 
 const extractTomlString = (configText: string, key: string): string => {
@@ -316,10 +402,26 @@ const buildClaudeEnvForConfig = (
   existingEnv: Record<string, unknown>,
   config: CoworkApiConfig,
 ): Record<string, unknown> => {
+  const existingAuthToken = getString(existingEnv.ANTHROPIC_AUTH_TOKEN);
+  const existingApiKey = getString(existingEnv.ANTHROPIC_API_KEY);
+  const hasUserCredential = Boolean(
+    existingAuthToken
+    || existingApiKey,
+  );
+  const credentialMatchesWesightConfig = Boolean(
+    config.apiKey
+    && (existingAuthToken === config.apiKey || existingApiKey === config.apiKey),
+  );
+  const shouldWriteCredential = !hasUserCredential
+    || credentialMatchesWesightConfig
+    || isWesightPlaceholder(existingEnv.ANTHROPIC_AUTH_TOKEN)
+    || isWesightPlaceholder(existingEnv.ANTHROPIC_API_KEY);
   return {
     ...existingEnv,
-    ANTHROPIC_AUTH_TOKEN: config.apiKey,
-    ANTHROPIC_API_KEY: config.apiKey,
+    ...(shouldWriteCredential ? {
+      ANTHROPIC_AUTH_TOKEN: WESIGHT_ACTIVE_API_KEY_PLACEHOLDER,
+      ANTHROPIC_API_KEY: WESIGHT_ACTIVE_API_KEY_PLACEHOLDER,
+    } : {}),
     ANTHROPIC_BASE_URL: config.baseURL,
     ANTHROPIC_MODEL: config.model,
     ANTHROPIC_REASONING_MODEL: config.model,
@@ -344,13 +446,6 @@ const mergeClaudeSettingsWithProvider = (
     ...providerEnv,
   };
 
-  for (const key of CLAUDE_MODEL_ENV_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(commonEnv, key)
-      && !Object.prototype.hasOwnProperty.call(providerEnv, key)) {
-      delete env[key];
-    }
-  }
-
   return {
     ...existingSettings,
     ...commonConfig,
@@ -359,13 +454,32 @@ const mergeClaudeSettingsWithProvider = (
   };
 };
 
-const buildClaudeSettingsForConfig = (
+export const mergeClaudeSettingsForWesightModel = (
   existingSettings: Record<string, unknown>,
   config: CoworkApiConfig,
 ): Record<string, unknown> => {
+  const existingManaged = getNestedRecord(existingSettings, WESIGHT_MANAGED_META_KEY);
+  const existingClaude = getNestedRecord(existingManaged, 'claudeCode');
+  const previousEnvKeys = Array.isArray(existingClaude.envKeys)
+    ? existingClaude.envKeys.filter((key): key is string => typeof key === 'string')
+    : [];
+  const existingEnv = { ...getNestedRecord(existingSettings, 'env') };
+  for (const key of previousEnvKeys) {
+    if (isWesightPlaceholder(existingEnv[key])) {
+      delete existingEnv[key];
+    }
+  }
+  const env = buildClaudeEnvForConfig(existingEnv, config);
   return {
     ...existingSettings,
-    env: buildClaudeEnvForConfig(getNestedRecord(existingSettings, 'env'), config),
+    env,
+    [WESIGHT_MANAGED_META_KEY]: {
+      ...existingManaged,
+      claudeCode: {
+        envKeys: CLAUDE_MODEL_ENV_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(env, key)),
+        secretEnv: WESIGHT_ACTIVE_API_KEY_ENV,
+      },
+    },
   };
 };
 
@@ -537,7 +651,7 @@ const upsertCcSwitchClaudeProvider = (
   const providers = readCcSwitchClaudeProviders(db);
   const targetProvider = findCcSwitchProviderForConfig(providers, config, settingsCurrentProviderId, providerName);
   const now = Date.now();
-  const settingsConfig = buildClaudeSettingsForConfig(targetProvider?.settingsConfig ?? {}, config);
+  const settingsConfig = mergeClaudeSettingsForWesightModel(targetProvider?.settingsConfig ?? {}, config);
   const providerId = targetProvider?.id ?? randomUUID();
   const existingMeta = targetProvider?.meta ?? {};
   const meta = {
@@ -654,7 +768,7 @@ const syncClaudeCodeFromWesightModel = (): void => {
   }
 
   const settings = readJsonObject(paths.primaryConfigPath) ?? {};
-  writeJsonObject(paths.primaryConfigPath, buildClaudeSettingsForConfig(settings, config));
+  writeJsonObject(paths.primaryConfigPath, mergeClaudeSettingsForWesightModel(settings, config));
 };
 
 const syncCodexFromWesightModel = (): void => {
@@ -666,14 +780,14 @@ const syncCodexFromWesightModel = (): void => {
 
   const providerName = resolved.providerMetadata?.providerName || 'wesight';
   const paths = getCliConfigPaths('codex');
-  const authPath = paths.secondaryConfigPaths[0] || path.join(path.dirname(paths.primaryConfigPath), 'auth.json');
-  const auth = readJsonObject(authPath) ?? {};
+  const existingConfigText = fs.existsSync(paths.primaryConfigPath)
+    ? fs.readFileSync(paths.primaryConfigPath, 'utf8')
+    : '';
 
-  atomicWrite(paths.primaryConfigPath, buildCodexConfig(providerName, config.baseURL, config.model));
-  writeJsonObject(authPath, {
-    ...auth,
-    OPENAI_API_KEY: config.apiKey,
-  });
+  atomicWrite(
+    paths.primaryConfigPath,
+    mergeCodexConfigForWesightModel(existingConfigText, providerName, config.baseURL, config.model),
+  );
 };
 
 export const syncOpenCodeGlobalConfigFromWesightModel = (): void => {

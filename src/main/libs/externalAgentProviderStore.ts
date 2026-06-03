@@ -14,6 +14,10 @@ import {
   settingsConfigFromDeepSeekTuiRecord,
   summarizeDeepSeekTuiSettingsConfig,
 } from './deepSeekTuiConfig';
+import {
+  mergeClaudeSettingsForWesightModel,
+  mergeCodexConfigForWesightModel,
+} from './externalAgentConfigSync';
 import { type CliAppType } from './externalAgentEnvironment';
 import {
   DEFAULT_GROK_BUILD_MODEL,
@@ -1269,7 +1273,16 @@ export class ExternalAgentProviderStore {
     const settingsConfig = this.stripInternalSettingsConfig(provider.settingsConfig);
     this.writeCcSwitchCurrentProvider(provider.appType, provider);
     if (provider.appType === CLAUDE_APP_TYPE) {
-      writeJsonFile(getClaudeSettingsPath(), settingsConfig);
+      const existingConfig = readJsonObject(getClaudeSettingsPath()) ?? {};
+      writeJsonFile(
+        getClaudeSettingsPath(),
+        mergeClaudeSettingsForWesightModel(existingConfig, {
+          apiKey: provider.summary.apiKey,
+          baseURL: provider.summary.baseUrl,
+          model: provider.summary.model || DEFAULT_CLAUDE_MODEL,
+          apiType: 'anthropic',
+        }),
+      );
       return;
     }
     if (provider.appType === OPENCODE_APP_TYPE) {
@@ -1400,9 +1413,17 @@ export class ExternalAgentProviderStore {
       return;
     }
 
-    const auth = getNestedRecord(settingsConfig, 'auth');
-    const config = getString(settingsConfig.config);
-    writeJsonFile(getCodexAuthPath(), auth);
-    atomicWrite(getCodexConfigPath(), config.endsWith('\n') ? config : `${config}\n`);
+    const existingConfigText = fs.existsSync(getCodexConfigPath())
+      ? fs.readFileSync(getCodexConfigPath(), 'utf8')
+      : '';
+    atomicWrite(
+      getCodexConfigPath(),
+      mergeCodexConfigForWesightModel(
+        existingConfigText,
+        provider.name,
+        provider.summary.baseUrl,
+        provider.summary.model || DEFAULT_CODEX_MODEL,
+      ),
+    );
   }
 }
