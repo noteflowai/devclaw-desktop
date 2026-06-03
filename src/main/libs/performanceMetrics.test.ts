@@ -63,6 +63,26 @@ test('keeps the first startup timing value by default', () => {
   expect(getPerformanceSnapshot().startupTimings.first_paint_ms).toBe(120);
 });
 
+test('includes startup and selected engine timings in performance snapshot', () => {
+  resetPerformanceMetricsForTesting();
+
+  markTimingValue('app_ready_ms', 12);
+  markTimingValue('window_created_ms', 45);
+  markTimingValue('first_paint_ms', 90);
+  markTimingValue('first_interactive_ms', 130);
+  markTimingValue('selected_engine_detect_ms', 18);
+  markTimingValue('selected_engine_ready_ms', 18);
+
+  expect(getPerformanceSnapshot().startupTimings).toMatchObject({
+    app_ready_ms: 12,
+    window_created_ms: 45,
+    first_paint_ms: 90,
+    first_interactive_ms: 130,
+    selected_engine_detect_ms: 18,
+    selected_engine_ready_ms: 18,
+  });
+});
+
 test('keeps a bounded slow DB operation ring buffer', () => {
   resetPerformanceMetricsForTesting();
   setDbSlowThresholdForTesting(1);

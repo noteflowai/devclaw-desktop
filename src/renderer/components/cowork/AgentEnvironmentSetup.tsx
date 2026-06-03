@@ -200,6 +200,28 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
     return snapshot?.engines.find((item) => item.appType === target.appType) ?? null;
   }, [snapshot]);
 
+  const getRepairHintKey = useCallback((target: AgentSetupTarget): string | null => {
+    const status = getCliStatus(target);
+    if (!status || status.checking) {
+      return null;
+    }
+    if (!status.found) {
+      return isSupportedInstallPlatform
+        ? 'agentSetupRepairCliMissingInstall'
+        : 'agentSetupRepairCliMissingManual';
+    }
+    if (!status.config.configExists) {
+      return 'agentSetupRepairConfigMissing';
+    }
+    if (!status.config.currentProviderId && status.config.providerCount === 0) {
+      return 'agentSetupRepairAuthMissing';
+    }
+    if (status.error) {
+      return 'agentSetupRepairCliError';
+    }
+    return null;
+  }, [getCliStatus, isSupportedInstallPlatform]);
+
   const missingRecommendedAppTypes = useMemo(() => {
     return RECOMMENDED_APP_TYPES.filter((appType) => {
       const target = AGENT_SETUP_TARGETS.find((item) => item.appType === appType);
@@ -300,6 +322,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
     const progressMessage = progress?.detail
       ? `${progress.message} ${progress.detail}`
       : progress?.message;
+    const repairHintKey = getRepairHintKey(target);
 
     return (
       <button
@@ -382,6 +405,13 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
                 {i18nService.t('coworkAgentEngineInstallCliUnsupported')}
               </div>
             )}
+          </div>
+        )}
+
+        {repairHintKey && (
+          <div className="mt-3 flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+            <ExclamationTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{i18nService.t(repairHintKey)}</span>
           </div>
         )}
 
