@@ -1693,6 +1693,13 @@ const isExternalAgentProviderAppType = (value: unknown): value is ExternalAgentP
   || value === 'deepseek_tui'
 );
 
+const normalizeAgentEngineSnapshotAppTypes = (value: unknown): ExternalAgentProviderAppType[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(new Set(value.filter(isExternalAgentProviderAppType)));
+};
+
 const AGENT_ENGINE_SNAPSHOT_TTL_MS = 30_000;
 
 interface AgentEngineSnapshotResponse {
@@ -1788,6 +1795,20 @@ const getCachedAgentEngineSnapshot = (options: { forceRefresh?: boolean } = {}):
     refreshing: agentEngineSnapshotRefreshing || !agentEngineSnapshotCache,
     cachedAt: agentEngineSnapshotCache ? agentEngineSnapshotCachedAt : undefined,
     error: agentEngineSnapshotLastError ?? undefined,
+  };
+};
+
+const getFilteredAgentEngineSnapshot = async (
+  appTypes: ExternalAgentProviderAppType[],
+): Promise<AgentEngineSnapshotResponse> => {
+  const { snapshot, report } = await getExternalAgentEnvironmentSnapshot({ appTypes });
+  const mergedSnapshot = mergeCodexAppStatus(snapshot);
+  summarizeAgentEngineProbeReport(report);
+  return {
+    success: true,
+    snapshot: mergedSnapshot,
+    refreshing: false,
+    cachedAt: Date.now(),
   };
 };
 
@@ -5127,8 +5148,12 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:agentEngines:list', async (_event, input: { forceRefresh?: unknown } = {}) => {
+  ipcMain.handle('cowork:agentEngines:list', async (_event, input: { forceRefresh?: unknown; appTypes?: unknown } = {}) => {
     try {
+      const appTypes = normalizeAgentEngineSnapshotAppTypes(input?.appTypes);
+      if (appTypes.length > 0) {
+        return await getFilteredAgentEngineSnapshot(appTypes);
+      }
       return getCachedAgentEngineSnapshot({ forceRefresh: input?.forceRefresh === true });
     } catch (error) {
       return {

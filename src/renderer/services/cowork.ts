@@ -812,7 +812,10 @@ class CoworkService {
     return false;
   }
 
-  async getAgentEngineSnapshot(options: { forceRefresh?: boolean } = {}): Promise<ExternalAgentEnvironmentSnapshot | null> {
+  async getAgentEngineSnapshot(options: {
+    forceRefresh?: boolean;
+    appTypes?: ExternalAgentProviderAppType[];
+  } = {}): Promise<ExternalAgentEnvironmentSnapshot | null> {
     const api = window.electron?.cowork?.listAgentEngines;
     if (!api) return null;
     const result = await api(options);

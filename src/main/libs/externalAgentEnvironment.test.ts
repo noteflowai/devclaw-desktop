@@ -105,3 +105,18 @@ test('does not treat WeSight placeholders as local CLI credentials', () => {
 
   expect(result.authStatus).toBe('logged_out');
 });
+
+test('limits probes to requested app types', async () => {
+  writeExecutable('codex', '#!/bin/sh\necho "codex-test 1.0.0"\n');
+
+  const { snapshot, report } = await getExternalAgentEnvironmentSnapshot({ appTypes: ['codex'] });
+
+  expect(snapshot.engines).toHaveLength(1);
+  expect(snapshot.engines[0]).toMatchObject({
+    appType: 'codex',
+    found: true,
+    path: path.join(tempDir, 'codex'),
+    version: 'codex-test 1.0.0',
+  });
+  expect(report.metrics.map(metric => metric.command)).toEqual(['codex']);
+});

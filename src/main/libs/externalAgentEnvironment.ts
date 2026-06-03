@@ -88,6 +88,10 @@ export interface ExternalAgentEnvironmentSnapshotResult {
   report: ExternalAgentEnvironmentProbeReport;
 }
 
+export interface ExternalAgentEnvironmentSnapshotOptions {
+  appTypes?: CliAppType[];
+}
+
 type CcSwitchSettings = {
   claude_config_dir?: unknown;
   codex_config_dir?: unknown;
@@ -962,6 +966,16 @@ const AGENT_ENGINE_COMMANDS = [
   { engine: CoworkAgentEngine.DeepSeekTui, appType: 'deepseek_tui', command: 'deepseek-tui' },
 ] as const satisfies Array<{ engine: CliCoworkAgentEngine; appType: CliAppType; command: string }>;
 
+const getAgentEngineCommands = (
+  options: ExternalAgentEnvironmentSnapshotOptions = {},
+): typeof AGENT_ENGINE_COMMANDS[number][] => {
+  if (!options.appTypes || options.appTypes.length === 0) {
+    return [...AGENT_ENGINE_COMMANDS];
+  }
+  const selectedAppTypes = new Set(options.appTypes);
+  return AGENT_ENGINE_COMMANDS.filter(({ appType }) => selectedAppTypes.has(appType));
+};
+
 const buildCcSwitchSnapshot = (
   appDir: string,
   settingsPath: string,
@@ -995,20 +1009,26 @@ const readBaseSnapshotInputs = (): {
   return { appDir, settingsPath, dbPath, settings };
 };
 
-export function getPlaceholderExternalAgentEnvironmentSnapshot(): ExternalAgentEnvironmentSnapshot {
+export function getPlaceholderExternalAgentEnvironmentSnapshot(
+  options: ExternalAgentEnvironmentSnapshotOptions = {},
+): ExternalAgentEnvironmentSnapshot {
   const { appDir, settingsPath, dbPath, settings } = readBaseSnapshotInputs();
+  const commands = getAgentEngineCommands(options);
   return {
     ccSwitch: buildCcSwitchSnapshot(appDir, settingsPath, dbPath, settings),
-    engines: AGENT_ENGINE_COMMANDS.map(({ engine, appType, command }) => (
+    engines: commands.map(({ engine, appType, command }) => (
       buildPlaceholderCommandStatus(engine, appType, command, settings, dbPath)
     )),
   };
 }
 
-export async function getExternalAgentEnvironmentSnapshot(): Promise<ExternalAgentEnvironmentSnapshotResult> {
+export async function getExternalAgentEnvironmentSnapshot(
+  options: ExternalAgentEnvironmentSnapshotOptions = {},
+): Promise<ExternalAgentEnvironmentSnapshotResult> {
   const startedAt = Date.now();
   const { appDir, settingsPath, dbPath, settings } = readBaseSnapshotInputs();
-  const results = await Promise.all(AGENT_ENGINE_COMMANDS.map(({ engine, appType, command }) => (
+  const commands = getAgentEngineCommands(options);
+  const results = await Promise.all(commands.map(({ engine, appType, command }) => (
     buildCommandStatus(engine, appType, command, settings, dbPath)
   )));
 

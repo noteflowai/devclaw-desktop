@@ -351,7 +351,10 @@ contextBridge.exposeInMainWorld('electron', {
       memoryUserMemoriesMaxItems?: number;
     }) =>
       ipcRenderer.invoke('cowork:config:set', config),
-    listAgentEngines: (input?: { forceRefresh?: boolean }) =>
+    listAgentEngines: (input?: {
+      forceRefresh?: boolean;
+      appTypes?: Array<'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui'>;
+    }) =>
       ipcRenderer.invoke('cowork:agentEngines:list', input),
     getRuntimeMetricsSummary: (filters: any) =>
       ipcRenderer.invoke(CoworkIpcChannel.RuntimeMetricsSummary, filters),

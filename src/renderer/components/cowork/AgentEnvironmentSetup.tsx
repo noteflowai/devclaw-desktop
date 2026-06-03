@@ -160,16 +160,25 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
   const selectedTarget = findTargetByEngine(effectiveSelectedEngine);
   const primaryTargets = AGENT_SETUP_TARGETS.filter((target) => target.primary);
   const moreTargets = AGENT_SETUP_TARGETS.filter((target) => !target.primary);
+  const initialScanAppTypes = useMemo(() => (
+    Array.from(new Set([
+      ...RECOMMENDED_APP_TYPES,
+      ...(selectedTarget ? [selectedTarget.appType] : []),
+    ]))
+  ), [selectedTarget]);
 
   const publishSnapshot = useCallback((nextSnapshot: ExternalAgentEnvironmentSnapshot | null) => {
     setSnapshot(nextSnapshot);
     onSnapshotChange?.(nextSnapshot);
   }, [onSnapshotChange]);
 
-  const refreshSnapshot = useCallback(async () => {
+  const refreshSnapshot = useCallback(async (options: {
+    forceRefresh?: boolean;
+    appTypes?: ExternalAgentProviderAppType[];
+  } = {}) => {
     setIsScanning(true);
     try {
-      const nextSnapshot = await coworkService.getAgentEngineSnapshot();
+      const nextSnapshot = await coworkService.getAgentEngineSnapshot(options);
       publishSnapshot(nextSnapshot);
       return nextSnapshot;
     } finally {
@@ -178,8 +187,8 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
   }, [publishSnapshot]);
 
   useEffect(() => {
-    void refreshSnapshot();
-  }, [refreshSnapshot]);
+    void refreshSnapshot({ appTypes: initialScanAppTypes });
+  }, [initialScanAppTypes, refreshSnapshot]);
 
   useEffect(() => {
     return coworkService.onAgentCliInstallProgress((progress) => {
@@ -459,7 +468,7 @@ const AgentEnvironmentSetup: React.FC<AgentEnvironmentSetupProps> = ({
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => void refreshSnapshot()}
+              onClick={() => void refreshSnapshot({ forceRefresh: true })}
               disabled={isScanning || Boolean(installingAppType)}
               className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-surface-raised disabled:cursor-wait disabled:opacity-60"
             >

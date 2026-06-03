@@ -695,7 +695,7 @@ interface IElectronAPI {
     respondToPermission: (options: { requestId: string; result: CoworkPermissionResult }) => Promise<{ success: boolean; error?: string }>;
     getConfig: () => Promise<{ success: boolean; config?: CoworkConfig; error?: string }>;
     setConfig: (config: CoworkConfigUpdate) => Promise<{ success: boolean; error?: string }>;
-    listAgentEngines: (input?: { forceRefresh?: boolean }) => Promise<CoworkAgentEngineListResult>;
+    listAgentEngines: (input?: { forceRefresh?: boolean; appTypes?: ExternalAgentProviderAppType[] }) => Promise<CoworkAgentEngineListResult>;
     getRuntimeMetricsSummary: (filters: RuntimeMetricsFilters) => Promise<{ success: boolean; summary?: RuntimeMetricsSummary; error?: string }>;
     listRuntimeCalls: (filters: RuntimeMetricsFilters) => Promise<{ success: boolean; total?: number; calls?: RuntimeCallRecord[]; error?: string }>;
     getRuntimeCallDetail: (callId: string) => Promise<{ success: boolean; call?: RuntimeCallRecord | null; error?: string }>;
