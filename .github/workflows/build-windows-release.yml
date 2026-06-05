@@ -1,0 +1,84 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing GitHub Release tag to upload Windows assets to'
+        required: true
+        default: 'v2026.6.2'
+      upload_to_release:
+        description: 'Upload built Windows assets to the release'
+        required: true
+        type: boolean
+        default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows x64 installer
+        run: npm run dist:win -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Generate Windows checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem release -File |
+            Where-Object { $_.Name -match '\.(exe|blockmap)$' -or $_.Name -eq 'latest.yml' } |
+            Sort-Object Name
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content -Path release/SHASUMS256-windows.txt -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-build
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+            release/SHASUMS256-windows.txt
+          retention-days: 7
+
+  upload-release-assets:
+    needs: build-windows-x64
+    if: ${{ inputs.upload_to_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-build
+          path: artifacts/windows-x64-build
+
+      - name: Upload Windows assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" artifacts/windows-x64-build/* --clobber --repo "$GITHUB_REPOSITORY"
