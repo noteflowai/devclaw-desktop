@@ -352,7 +352,7 @@ Scan the QR code below to join the WeSight WeChat group and talk with other buil
 Search **苍何** on WeChat or scan the QR code below to follow Canghe's original WeChat official account. Reply with **AI** to get more AI prompt and agent workflow resources.
 
 <p align="center">
-  <img src="public/wechat-official-account.png" alt="Canghe WeChat Official Account" width="280">
+  <img src="public/wechat-official-account.png" alt="Canghe WeChat Official Account" width="760">
 </p>
 
 ## Acknowledgements
