@@ -20,7 +20,7 @@
   <strong>English</strong> | <a href="README_zh.md">简体中文</a>
 </p>
 
-WeSight is an open-source desktop control console for local AI agents. It helps you install or reuse Claude Code, Codex, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, and the built-in agent runtime, then gives them a visual workspace for chat, tools, files, IM channels, skills, model providers, runtime metrics, and desktop companion workflows.
+WeSight is an open-source desktop control console for local AI agents. It helps you install or reuse Claude Code, Codex, Kimi Code, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, and the built-in agent runtime, then gives them a visual workspace for chat, tools, files, IM channels, skills, model providers, runtime metrics, and desktop companion workflows.
 
 > Early public releases ship macOS Apple Silicon and Intel builds. If WeSight helps your agent workflow, a Star makes the project easier for more builders to discover.
 
@@ -57,7 +57,7 @@ Terminal-native coding agents are powerful, while their setup, model routing, pe
   </tr>
   <tr>
     <td><strong>Cowork Chat</strong><br>Run local coding agents as a desktop chat with engine and model controls.</td>
-    <td><strong>Agent Engines</strong><br>Configure Claude Code, Codex, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, and the built-in runtime.</td>
+    <td><strong>Agent Engines</strong><br>Configure Claude Code, Codex, Kimi Code, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, and the built-in runtime.</td>
   </tr>
   <tr>
     <td width="50%">
@@ -87,10 +87,10 @@ Terminal-native coding agents are powerful, while their setup, model routing, pe
 
 ## Core Features
 
-- **Agent Engines** - Run Claude Code, Codex, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, or the built-in runtime from the same workspace.
+- **Agent Engines** - Run Claude Code, Codex, Kimi Code, OpenClaw, Hermes Agent, OpenCode, Qwen Code, DeepSeek-TUI, or the built-in runtime from the same workspace.
 - **One-click setup** - On macOS, WeSight can install supported local CLIs or detect the ones already present on the machine.
 - **Unified model providers** - Configure official OpenAI, Anthropic Claude, Google Gemini, DeepSeek, Qwen, Moonshot, Ollama, OpenRouter, GitHub Copilot, and custom OpenAI-compatible endpoints.
-- **Local CLI configuration** - Use existing Claude Code, Codex, OpenClaw, Hermes Agent, OpenCode, Qwen Code, or DeepSeek-TUI accounts and config when you already have a working terminal setup.
+- **Local CLI configuration** - Use existing Claude Code, Codex, Kimi Code, OpenClaw, Hermes Agent, OpenCode, Qwen Code, or DeepSeek-TUI accounts and config when you already have a working terminal setup.
 - **Graphical tool execution** - View commands, files, permissions, slash commands, outputs, generated images, and tool results inside the chat flow.
 - **IM Agent Hub** - Route Feishu messages into OpenClaw, Hermes Agent, Claude Code, or Codex, with per-engine bot profiles.
 - **AI Runtime Dashboard** - Measure calls by engine, model, source, status, tokens, completion time, TTFT, output-phase TPS, estimated model TPS, tool latency, and agent steps.
@@ -116,6 +116,7 @@ Terminal-native coding agents are powerful, while their setup, model routing, pe
 | Built-in runtime | General desktop cowork sessions and skills                  | Included in WeSight                             |
 | Claude Code      | Claude Code workflows with a graphical chat surface         | One-click install or existing local CLI config  |
 | Codex            | Codex CLI workflows, local task execution, and IM control   | One-click install or existing local CLI config  |
+| Kimi Code        | Kimi Code workflows with local login, Skills, and MCP       | Official installer or existing local CLI config |
 | OpenClaw         | Runtime gateway, IM channels, sandbox-style agent work      | Local runtime/CLI reuse or WeSight setup flow   |
 | Hermes Agent     | Local Hermes Agent gateway and IM-style runtime experiments | Official installer or existing local CLI config |
 | OpenCode         | OpenCode terminal agent workflows                           | One-click install or existing local CLI config  |
@@ -360,7 +361,7 @@ WeSight is shaped by many excellent open-source projects and agent community pra
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) for local agent runtime, gateway, and model configuration ideas.
 - [Star-Office-UI](https://github.com/ringhyacinth/Star-Office-UI) for the pixel-style AI studio inspiration.
 - [SkillHub](https://skillhub.lol/skills) for ideas around skill discovery, installation, and marketplace flows.
-- The terminal-agent ecosystem around Claude Code, Codex, OpenCode, Qwen Code, DeepSeek-TUI, and the builders pushing local AI agent workflows forward.
+- The terminal-agent ecosystem around Claude Code, Codex, Kimi Code, OpenCode, Qwen Code, DeepSeek-TUI, and the builders pushing local AI agent workflows forward.
 
 ## License
 

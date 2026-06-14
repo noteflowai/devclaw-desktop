@@ -141,6 +141,32 @@ const INSTALL_TARGETS: Record<CliAppType, InstallTarget> = {
       },
     ],
   },
+  opensquilla: {
+    appType: 'opensquilla',
+    displayName: 'OpenSquilla',
+    command: 'opensquilla',
+    methods: [
+      {
+        id: 'uv-wheel',
+        packageName: 'opensquilla[recommended] @ https://github.com/opensquilla/opensquilla/releases/download/v0.3.1/opensquilla-0.3.1-py3-none-any.whl',
+      },
+    ],
+  },
+  kimi: {
+    appType: 'kimi',
+    displayName: 'Kimi Code',
+    command: 'kimi',
+    methods: [
+      {
+        id: 'official-installer',
+        scriptUrl: 'https://code.kimi.com/kimi-code/install.sh',
+      },
+      {
+        id: 'npm',
+        packageName: '@moonshot-ai/kimi-code',
+      },
+    ],
+  },
 };
 
 const readInstallSnapshot = async (): Promise<ExternalAgentEnvironmentSnapshot> => {
@@ -228,11 +254,23 @@ const buildInstallScript = (target: InstallTarget): string => {
     const installCommand = scriptArgs
       ? `curl -fsSL ${quoteForShell(scriptUrl)} | bash -s -- ${scriptArgs}`
       : `curl -fsSL ${quoteForShell(scriptUrl)} | bash`;
+    const fallbackMethod = target.methods.find((item) => item.id === 'npm' && item.packageName);
+    const fallbackLines = fallbackMethod
+      ? [
+        `if ! command -v ${target.command} >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/${target.command}" ]; then`,
+        '  if command -v npm >/dev/null 2>&1; then',
+        `    echo "__WESIGHT_INSTALL_METHOD__=${fallbackMethod.id}"`,
+        `    npm install -g ${quoteForShell(fallbackMethod.packageName ?? '')}`,
+        '  fi',
+        'fi',
+      ]
+      : [];
     return [
       'set -e',
       'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"',
       `echo "__WESIGHT_INSTALL_METHOD__=${method.id}"`,
       installCommand,
+      ...fallbackLines,
       `if command -v ${target.command} >/dev/null 2>&1; then`,
       `  BINARY_PATH="$(command -v ${target.command})"`,
       `elif [ -x "$HOME/.local/bin/${target.command}" ]; then`,
@@ -243,6 +281,44 @@ const buildInstallScript = (target: InstallTarget): string => {
       'fi',
       'echo "__WESIGHT_BINARY_PATH__=${BINARY_PATH}"',
       'VERSION_OUTPUT=$({ "$BINARY_PATH" --version 2>&1 || true; } | head -n 1)',
+      'echo "__WESIGHT_VERSION__=${VERSION_OUTPUT}"',
+    ].join('\n');
+  }
+
+  if (method.id === 'uv-wheel') {
+    if (process.platform === 'win32') {
+      throw new Error(`Automatic installation is not available for ${target.displayName} on Windows.`);
+    }
+    const packageSpec = method.packageName;
+    if (!packageSpec) {
+      throw new Error(`Package spec is missing for ${target.displayName}.`);
+    }
+    return [
+      'set -e',
+      'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"',
+      'if ! command -v uv >/dev/null 2>&1; then',
+      '  echo "__WESIGHT_INSTALL_METHOD__=uv-bootstrap"',
+      '  curl -LsSf https://astral.sh/uv/install.sh | sh',
+      '  . "$HOME/.local/bin/env" 2>/dev/null || true',
+      '  export PATH="$HOME/.local/bin:$PATH"',
+      'fi',
+      'if ! command -v uv >/dev/null 2>&1; then',
+      '  echo "uv was not found after installation." >&2',
+      '  exit 127',
+      'fi',
+      `echo "__WESIGHT_INSTALL_METHOD__=${method.id}"`,
+      `uv tool install --python 3.12 ${quoteForShell(packageSpec)}`,
+      'BINARY_PATH=""',
+      `if [ -x "$HOME/.local/bin/${target.command}" ]; then`,
+      `  BINARY_PATH="$HOME/.local/bin/${target.command}"`,
+      `elif command -v ${target.command} >/dev/null 2>&1; then`,
+      `  BINARY_PATH="$(command -v ${target.command})"`,
+      'else',
+      `  echo "${target.command} command was not found after installation." >&2`,
+      '  exit 127',
+      'fi',
+      'echo "__WESIGHT_BINARY_PATH__=${BINARY_PATH}"',
+      'VERSION_OUTPUT=$({ "$BINARY_PATH" --version 2>&1 || "$BINARY_PATH" --help 2>&1 || true; } | head -n 1)',
       'echo "__WESIGHT_VERSION__=${VERSION_OUTPUT}"',
     ].join('\n');
   }

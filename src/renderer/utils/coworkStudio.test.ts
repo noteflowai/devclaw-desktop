@@ -1,4 +1,10 @@
-import { ClaudeCodePermissionMode, CoworkAgentEngine, ExternalAgentConfigSource } from '@shared/cowork/constants';
+import {
+  ClaudeCodePermissionMode,
+  CoworkAgentEngine,
+  ExternalAgentConfigSource,
+  KimiCodePermissionMode,
+  OpenSquillaPermissionMode,
+} from '@shared/cowork/constants';
 import {
   type CoworkFileActivity,
   CoworkFileActivitySource,
@@ -42,6 +48,8 @@ const makeConfig = (agentEngine: CoworkAgentEngine): CoworkConfig => ({
   systemPrompt: '',
   executionMode: 'local',
   agentEngine,
+  clawAgentGatewayUrl: '',
+  clawAgentToken: '',
   openclawConfigSource: ExternalAgentConfigSource.LocalCli,
   claudeCodeConfigSource: ExternalAgentConfigSource.WesightModel,
   claudeCodePermissionMode: ClaudeCodePermissionMode.BypassPermissions,
@@ -53,6 +61,10 @@ const makeConfig = (agentEngine: CoworkAgentEngine): CoworkConfig => ({
   qwenCodePermissionMode: 'auto',
   deepseekTuiConfigSource: ExternalAgentConfigSource.WesightModel,
   deepseekTuiPermissionMode: 'auto',
+  opensquillaConfigSource: ExternalAgentConfigSource.LocalCli,
+  opensquillaPermissionMode: OpenSquillaPermissionMode.Bypass,
+  kimiCodeConfigSource: ExternalAgentConfigSource.LocalCli,
+  kimiCodePermissionMode: KimiCodePermissionMode.Auto,
   memoryEnabled: true,
   memoryImplicitUpdateEnabled: true,
   memoryLlmJudgeEnabled: false,

@@ -1,4 +1,5 @@
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import { spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import type { WebContents } from 'electron';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker,protocol, screen, session, shell } from 'electron';
@@ -20,11 +21,14 @@ import {
   isCoworkAgentEngine,
   isDeepSeekTuiPermissionMode,
   isExternalAgentConfigSource,
+  isKimiCodePermissionMode,
   isOpenClawCoworkAgentEngine,
   isOpenCodePermissionMode,
+  isOpenSquillaPermissionMode,
   isQwenCodePermissionMode,
   isRuntimeCallSource,
   isRuntimeCallStatus,
+  KimiCodePermissionMode,
   RuntimeCallSource,
 } from '../shared/cowork/constants';
 import type { CoworkFileActivity } from '../shared/cowork/fileActivity';
@@ -80,6 +84,7 @@ import type { ScheduledTaskHandlerDeps } from './ipcHandlers/scheduledTask/handl
 import type { ScheduledTaskHelperDeps } from './ipcHandlers/scheduledTask/helpers';
 import {
   ClaudeRuntimeAdapter,
+  ClawAgentRuntimeAdapter,
   CodexAppRuntimeAdapter,
   type CoworkAgentEngine,
   CoworkEngineRouter,
@@ -128,6 +133,7 @@ import {
   type ExternalAgentEnvironmentSnapshot,
   getExternalAgentEnvironmentSnapshot,
   getPlaceholderExternalAgentEnvironmentSnapshot,
+  resolveCliCommand,
 } from './libs/externalAgentEnvironment';
 import { resolveLocalClaudeCodeConfigSnapshot } from './libs/externalAgentLocalEnv';
 import {
@@ -772,6 +778,7 @@ let codexAppServerClient: CodexAppServerClient | null = null;
 let codexAppTaskSync: CodexAppTaskSync | null = null;
 let claudeRuntimeAdapter: ClaudeRuntimeAdapter | null = null;
 let openClawRuntimeAdapter: OpenClawRuntimeAdapter | null = null;
+let clawAgentRuntimeAdapter: ClawAgentRuntimeAdapter | null = null;
 let hermesRuntimeAdapter: HermesRuntimeAdapter | null = null;
 let claudeCodeRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
 let codexRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
@@ -779,6 +786,8 @@ let codexAppRuntimeAdapter: CodexAppRuntimeAdapter | null = null;
 let openCodeRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
 let grokBuildRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
 let qwenCodeRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
+let openSquillaRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
+let kimiCodeRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
 let deepSeekTuiRuntimeManager: DeepSeekTuiRuntimeManager | null = null;
 let deepSeekTuiRuntimeAdapter: DeepSeekTuiRuntimeAdapter | null = null;
 let coworkEngineRouter: CoworkEngineRouter | null = null;
@@ -1219,6 +1228,8 @@ const getConfigSourceForEngine = (engine: CoworkAgentEngine): string | null => {
   if (engine === CoworkAgentEngineValue.GrokBuild) return ExternalAgentConfigSource.LocalCli;
   if (engine === CoworkAgentEngineValue.QwenCode) return config.qwenCodeConfigSource;
   if (engine === CoworkAgentEngineValue.DeepSeekTui) return config.deepseekTuiConfigSource;
+  if (engine === CoworkAgentEngineValue.OpenSquilla) return config.opensquillaConfigSource;
+  if (engine === CoworkAgentEngineValue.KimiCode) return config.kimiCodeConfigSource;
   return ExternalAgentConfigSource.WesightModel;
 };
 
@@ -1232,6 +1243,8 @@ const getExternalProviderAppTypeForEngine = (
   if (engine === CoworkAgentEngineValue.GrokBuild) return 'grok';
   if (engine === CoworkAgentEngineValue.QwenCode) return 'qwen';
   if (engine === CoworkAgentEngineValue.DeepSeekTui) return 'deepseek_tui';
+  if (engine === CoworkAgentEngineValue.OpenSquilla) return 'opensquilla';
+  if (engine === CoworkAgentEngineValue.KimiCode) return 'kimi';
   return null;
 };
 
@@ -1308,6 +1321,8 @@ const getEngineSnapshotLabel = (engine: CoworkAgentEngine): string => {
   if (engine === CoworkAgentEngineValue.GrokBuild) return 'Grok Build';
   if (engine === CoworkAgentEngineValue.QwenCode) return 'Qwen Code';
   if (engine === CoworkAgentEngineValue.DeepSeekTui) return 'DeepSeek-TUI';
+  if (engine === CoworkAgentEngineValue.OpenSquilla) return 'OpenSquilla';
+  if (engine === CoworkAgentEngineValue.KimiCode) return 'Kimi Code';
   return 'Cowork';
 };
 
@@ -1316,6 +1331,13 @@ const getClaudeCodePermissionLabel = (mode: string | null | undefined): string |
   if (mode === ClaudeCodePermissionMode.Default) return 'Default';
   if (mode === ClaudeCodePermissionMode.Plan) return 'Plan';
   if (mode === ClaudeCodePermissionMode.AcceptEdits) return 'Accept Edits';
+  return null;
+};
+
+const getKimiCodePermissionLabel = (mode: string | null | undefined): string | null => {
+  if (mode === KimiCodePermissionMode.Auto) return 'Auto';
+  if (mode === KimiCodePermissionMode.Yolo) return 'YOLO';
+  if (mode === KimiCodePermissionMode.Plan) return 'Plan';
   return null;
 };
 
@@ -1330,7 +1352,11 @@ const resolveSessionRuntimeSnapshot = (
   const config = getCoworkStore().getConfig();
   const permissionMode = engine === CoworkAgentEngineValue.ClaudeCode
     ? config.claudeCodePermissionMode
-    : null;
+    : engine === CoworkAgentEngineValue.OpenSquilla
+      ? config.opensquillaPermissionMode
+      : engine === CoworkAgentEngineValue.KimiCode
+        ? config.kimiCodePermissionMode
+      : null;
   const modelLabel = engine === CoworkAgentEngineValue.CodexApp
     ? 'Codex App Config'
     : [model.providerName, model.modelName || model.modelId]
@@ -1346,7 +1372,11 @@ const resolveSessionRuntimeSnapshot = (
     modelLabel: modelLabel || 'Unknown model',
     configSource: model.configSource,
     permissionMode,
-    permissionModeLabel: getClaudeCodePermissionLabel(permissionMode),
+    permissionModeLabel: engine === CoworkAgentEngineValue.ClaudeCode
+      ? getClaudeCodePermissionLabel(permissionMode)
+      : engine === CoworkAgentEngineValue.KimiCode
+        ? getKimiCodePermissionLabel(permissionMode)
+      : permissionMode,
     capturedAt: Date.now(),
   };
 };
@@ -1675,6 +1705,14 @@ const applyExternalAgentConfigSourceForEngine = (engine: CoworkAgentEngine): voi
   }
   if (engine === CoworkAgentEngineValue.DeepSeekTui) {
     applyExternalAgentConfigForEngine(engine, config.deepseekTuiConfigSource);
+    return;
+  }
+  if (engine === CoworkAgentEngineValue.OpenSquilla) {
+    applyExternalAgentConfigForEngine(engine, config.opensquillaConfigSource);
+    return;
+  }
+  if (engine === CoworkAgentEngineValue.KimiCode) {
+    applyExternalAgentConfigForEngine(engine, config.kimiCodeConfigSource);
   }
 };
 
@@ -1743,6 +1781,8 @@ const isExternalAgentProviderAppType = (value: unknown): value is ExternalAgentP
   || value === 'grok'
   || value === 'qwen'
   || value === 'deepseek_tui'
+  || value === 'opensquilla'
+  || value === 'kimi'
 );
 
 const normalizeAgentEngineSnapshotAppTypes = (value: unknown): ExternalAgentProviderAppType[] => {
@@ -1864,7 +1904,11 @@ const getCachedAgentEngineSnapshot = (options: { forceRefresh?: boolean } = {}):
 const getFilteredAgentEngineSnapshot = async (
   appTypes: ExternalAgentProviderAppType[],
 ): Promise<AgentEngineSnapshotResponse> => {
-  const { snapshot, report } = await getExternalAgentEnvironmentSnapshot({ appTypes });
+  const { snapshot, report } = await getExternalAgentEnvironmentSnapshot({
+    appTypes,
+    commandProbeTimeoutMs: 900,
+    versionProbeTimeoutMs: 900,
+  });
   const mergedSnapshot = mergeCodexAppStatus(snapshot);
   summarizeAgentEngineProbeReport(report);
   return {
@@ -2063,6 +2107,7 @@ const syncOpenClawConfig = async (
   const secretEnvVarsChanged = JSON.stringify(nextSecretEnvVars) !== JSON.stringify(prevSecretEnvVars);
   const shouldUseManagedGateway = getCoworkStore().getConfig().openclawConfigSource === ExternalAgentConfigSource.WesightModel;
   manager.setSecretEnvVars(nextSecretEnvVars);
+  manager.syncLaunchAgentSecretEnvVars(nextSecretEnvVars);
   manager.setRequireManagedGateway(shouldUseManagedGateway);
 
   if (syncResult.skipped) {
@@ -2329,6 +2374,20 @@ const getCoworkEngineRouter = () => {
         getCurrentProvider: (appType) => getExternalAgentProviderStore().getCurrentProvider(appType),
       });
     }
+    if (!openSquillaRuntimeAdapter) {
+      openSquillaRuntimeAdapter = new ExternalCliRuntimeAdapter({
+        engine: CoworkAgentEngineValue.OpenSquilla,
+        store: getCoworkStore(),
+        getCurrentProvider: (appType) => getExternalAgentProviderStore().getCurrentProvider(appType),
+      });
+    }
+    if (!kimiCodeRuntimeAdapter) {
+      kimiCodeRuntimeAdapter = new ExternalCliRuntimeAdapter({
+        engine: CoworkAgentEngineValue.KimiCode,
+        store: getCoworkStore(),
+        getCurrentProvider: (appType) => getExternalAgentProviderStore().getCurrentProvider(appType),
+      });
+    }
     if (!deepSeekTuiRuntimeAdapter) {
       deepSeekTuiRuntimeAdapter = new DeepSeekTuiRuntimeAdapter({
         store: getCoworkStore(),
@@ -2343,9 +2402,18 @@ const getCoworkEngineRouter = () => {
         ensureRunning: ensureHermesRunningForCowork,
       });
     }
+    if (!clawAgentRuntimeAdapter) {
+      clawAgentRuntimeAdapter = new ClawAgentRuntimeAdapter(getCoworkStore(), () => {
+        const clawCfg = getCoworkStore().getConfig();
+        const gatewayUrl = (clawCfg.clawAgentGatewayUrl || process.env.CLAW_AGENT_GATEWAY_URL || '').trim();
+        const token = (clawCfg.clawAgentToken || process.env.CLAW_AGENT_TOKEN || '').trim();
+        return { gatewayUrl, token: token || undefined };
+      });
+    }
     coworkEngineRouter = new CoworkEngineRouter({
       getCurrentEngine: resolveCoworkAgentEngine,
       openclawRuntime: openClawRuntimeAdapter,
+      clawAgentRuntime: clawAgentRuntimeAdapter,
       hermesRuntime: hermesRuntimeAdapter,
       claudeRuntime: claudeRuntimeAdapter,
       claudeCodeRuntime: claudeCodeRuntimeAdapter,
@@ -2355,6 +2423,8 @@ const getCoworkEngineRouter = () => {
       grokBuildRuntime: grokBuildRuntimeAdapter,
       qwenCodeRuntime: qwenCodeRuntimeAdapter,
       deepSeekTuiRuntime: deepSeekTuiRuntimeAdapter,
+      openSquillaRuntime: openSquillaRuntimeAdapter,
+      kimiCodeRuntime: kimiCodeRuntimeAdapter,
       telemetryTracker: getRuntimeTelemetryTracker(),
     });
   }
@@ -2959,6 +3029,8 @@ const getDesktopPetEngineLabel = (engine: CoworkAgentEngine): string => {
   if (engine === CoworkAgentEngineValue.GrokBuild) return 'Grok Build';
   if (engine === CoworkAgentEngineValue.QwenCode) return 'Qwen Code';
   if (engine === CoworkAgentEngineValue.DeepSeekTui) return 'DeepSeek-TUI';
+  if (engine === CoworkAgentEngineValue.OpenSquilla) return 'OpenSquilla';
+  if (engine === CoworkAgentEngineValue.KimiCode) return 'Kimi Code';
   return 'WeSight';
 };
 
@@ -5766,6 +5838,8 @@ if (!gotTheLock) {
     workingDirectory?: string;
     executionMode?: 'auto' | 'local' | 'sandbox';
     agentEngine?: CoworkAgentEngine;
+    clawAgentGatewayUrl?: string;
+    clawAgentToken?: string;
     claudeCodeConfigSource?: unknown;
     claudeCodePermissionMode?: unknown;
     codexConfigSource?: unknown;
@@ -5776,6 +5850,10 @@ if (!gotTheLock) {
     qwenCodePermissionMode?: unknown;
     deepseekTuiConfigSource?: unknown;
     deepseekTuiPermissionMode?: unknown;
+    opensquillaConfigSource?: unknown;
+    opensquillaPermissionMode?: unknown;
+    kimiCodeConfigSource?: unknown;
+    kimiCodePermissionMode?: unknown;
     memoryEnabled?: boolean;
     memoryImplicitUpdateEnabled?: boolean;
     memoryLlmJudgeEnabled?: boolean;
@@ -5820,6 +5898,18 @@ if (!gotTheLock) {
       const normalizedDeepSeekTuiPermissionMode = isDeepSeekTuiPermissionMode(config.deepseekTuiPermissionMode)
         ? config.deepseekTuiPermissionMode
         : undefined;
+      const normalizedOpenSquillaConfigSource = isExternalAgentConfigSource(config.opensquillaConfigSource)
+        ? config.opensquillaConfigSource
+        : undefined;
+      const normalizedOpenSquillaPermissionMode = isOpenSquillaPermissionMode(config.opensquillaPermissionMode)
+        ? config.opensquillaPermissionMode
+        : undefined;
+      const normalizedKimiCodeConfigSource = isExternalAgentConfigSource(config.kimiCodeConfigSource)
+        ? config.kimiCodeConfigSource
+        : undefined;
+      const normalizedKimiCodePermissionMode = isKimiCodePermissionMode(config.kimiCodePermissionMode)
+        ? config.kimiCodePermissionMode
+        : undefined;
       const normalizedMemoryEnabled = typeof config.memoryEnabled === 'boolean'
         ? config.memoryEnabled
         : undefined;
@@ -5855,6 +5945,10 @@ if (!gotTheLock) {
         qwenCodePermissionMode: normalizedQwenCodePermissionMode,
         deepseekTuiConfigSource: normalizedDeepSeekTuiConfigSource,
         deepseekTuiPermissionMode: normalizedDeepSeekTuiPermissionMode,
+        opensquillaConfigSource: normalizedOpenSquillaConfigSource,
+        opensquillaPermissionMode: normalizedOpenSquillaPermissionMode,
+        kimiCodeConfigSource: normalizedKimiCodeConfigSource,
+        kimiCodePermissionMode: normalizedKimiCodePermissionMode,
         memoryEnabled: normalizedMemoryEnabled,
         memoryImplicitUpdateEnabled: normalizedMemoryImplicitUpdateEnabled,
         memoryLlmJudgeEnabled: normalizedMemoryLlmJudgeEnabled,
@@ -5897,6 +5991,18 @@ if (!gotTheLock) {
       if (normalizedDeepSeekTuiPermissionMode !== undefined) {
         nextConfigPreview.deepseekTuiPermissionMode = normalizedDeepSeekTuiPermissionMode;
       }
+      if (normalizedOpenSquillaConfigSource !== undefined) {
+        nextConfigPreview.opensquillaConfigSource = normalizedOpenSquillaConfigSource;
+      }
+      if (normalizedOpenSquillaPermissionMode !== undefined) {
+        nextConfigPreview.opensquillaPermissionMode = normalizedOpenSquillaPermissionMode;
+      }
+      if (normalizedKimiCodeConfigSource !== undefined) {
+        nextConfigPreview.kimiCodeConfigSource = normalizedKimiCodeConfigSource;
+      }
+      if (normalizedKimiCodePermissionMode !== undefined) {
+        nextConfigPreview.kimiCodePermissionMode = normalizedKimiCodePermissionMode;
+      }
       const shouldApplyExternalAgentConfig =
         (nextConfigPreview.agentEngine === CoworkAgentEngineValue.ClaudeCode
           && (normalizedAgentEngine !== undefined || normalizedClaudeCodeConfigSource !== undefined))
@@ -5907,7 +6013,11 @@ if (!gotTheLock) {
         || (nextConfigPreview.agentEngine === CoworkAgentEngineValue.QwenCode
           && (normalizedAgentEngine !== undefined || normalizedQwenCodeConfigSource !== undefined))
         || (nextConfigPreview.agentEngine === CoworkAgentEngineValue.DeepSeekTui
-          && (normalizedAgentEngine !== undefined || normalizedDeepSeekTuiConfigSource !== undefined));
+          && (normalizedAgentEngine !== undefined || normalizedDeepSeekTuiConfigSource !== undefined))
+        || (nextConfigPreview.agentEngine === CoworkAgentEngineValue.OpenSquilla
+          && (normalizedAgentEngine !== undefined || normalizedOpenSquillaConfigSource !== undefined))
+        || (nextConfigPreview.agentEngine === CoworkAgentEngineValue.KimiCode
+          && (normalizedAgentEngine !== undefined || normalizedKimiCodeConfigSource !== undefined));
       if (shouldApplyExternalAgentConfig) {
         const source = nextConfigPreview.agentEngine === CoworkAgentEngineValue.ClaudeCode
           ? nextConfigPreview.claudeCodeConfigSource
@@ -5917,7 +6027,11 @@ if (!gotTheLock) {
               ? nextConfigPreview.opencodeConfigSource
               : nextConfigPreview.agentEngine === CoworkAgentEngineValue.QwenCode
                 ? nextConfigPreview.qwenCodeConfigSource
-                : nextConfigPreview.deepseekTuiConfigSource;
+                : nextConfigPreview.agentEngine === CoworkAgentEngineValue.DeepSeekTui
+                  ? nextConfigPreview.deepseekTuiConfigSource
+                  : nextConfigPreview.agentEngine === CoworkAgentEngineValue.OpenSquilla
+                    ? nextConfigPreview.opensquillaConfigSource
+                    : nextConfigPreview.kimiCodeConfigSource;
         applyExternalAgentConfigForEngine(nextConfigPreview.agentEngine, source);
       }
       getCoworkStore().setConfig(normalizedConfig);
@@ -7091,6 +7205,93 @@ if (!gotTheLock) {
     }
   });
 
+  ipcMain.handle('opensquilla:control:probe', async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const response = await fetch('http://127.0.0.1:18791/control/', {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      return {
+        reachable: response.ok,
+        status: response.status,
+        url: 'http://127.0.0.1:18791/control/',
+        frameBlocked: /deny|sameorigin/i.test(response.headers.get('x-frame-options') ?? ''),
+      };
+    } catch (error) {
+      return {
+        reachable: false,
+        error: error instanceof Error ? error.message : 'OpenSquilla control is not reachable.',
+        url: 'http://127.0.0.1:18791/control/',
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  const runOpenSquillaGatewayCommand = async (action: 'status' | 'start' | 'restart' | 'stop') => {
+    const resolution = await resolveCliCommand('opensquilla', {
+      commandProbeTimeoutMs: 5_000,
+      includeUserShellPath: true,
+    });
+    if (!resolution.found || !resolution.path) {
+      return {
+        success: false,
+        action,
+        error: resolution.error || 'OpenSquilla CLI was not found.',
+      };
+    }
+    const args = action === 'start'
+      ? ['gateway', 'start', '--json', '--timeout', '20']
+      : ['gateway', action, '--json'];
+    const result = spawnSync(resolution.path, args, {
+      cwd: os.homedir(),
+      env: process.env,
+      encoding: 'utf8',
+      timeout: action === 'status' ? 8_000 : 30_000,
+      windowsHide: process.platform === 'win32',
+    });
+    const parsePayload = (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return null;
+      const jsonLine = trimmed.split(/\r?\n/).reverse().find((line) => line.trim().startsWith('{'));
+      if (!jsonLine) return null;
+      try {
+        return JSON.parse(jsonLine) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    };
+    const payload = parsePayload(result.stdout) ?? parsePayload(result.stderr);
+    if (result.error) {
+      return {
+        success: false,
+        action,
+        payload,
+        error: result.error.message,
+      };
+    }
+    if (result.status !== 0) {
+      return {
+        success: false,
+        action,
+        payload,
+        error: (result.stderr || result.stdout || `OpenSquilla gateway ${action} failed.`).trim(),
+      };
+    }
+    return {
+      success: true,
+      action,
+      payload,
+    };
+  };
+
+  ipcMain.handle('opensquilla:gateway:status', () => runOpenSquillaGatewayCommand('status'));
+  ipcMain.handle('opensquilla:gateway:start', () => runOpenSquillaGatewayCommand('start'));
+  ipcMain.handle('opensquilla:gateway:restart', () => runOpenSquillaGatewayCommand('restart'));
+  ipcMain.handle('opensquilla:gateway:stop', () => runOpenSquillaGatewayCommand('stop'));
+
   // App update download & install
   ipcMain.handle('appUpdate:download', async (event, url: string) => {
     // Block downloads in enterprise mode
@@ -7408,7 +7609,7 @@ if (!gotTheLock) {
         "font-src 'self' data:",
         "media-src 'self'",
         "worker-src 'self' blob:",
-        "frame-src 'self'"
+        "frame-src 'self' http://127.0.0.1:18791"
       ];
 
       callback({

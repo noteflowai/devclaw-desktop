@@ -238,6 +238,8 @@ const SKILL_STATE_KEY = 'skills_state';
 const WATCH_DEBOUNCE_MS = 250;
 const CLAUDE_SKILLS_DIR_NAME = '.claude';
 const CLAUDE_SKILLS_SUBDIR = 'skills';
+const OPENSQUILLA_SKILLS_DIR_NAME = '.opensquilla';
+const OPENSQUILLA_SKILLS_SUBDIR = 'skills';
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
@@ -1509,11 +1511,20 @@ export class SkillManager {
     const builtInSkillIds = this.listBuiltInSkillIds();
     const skillMap = new Map<string, SkillRecord>();
 
+    const openSquillaSkillRoots = this.getOpenSquillaSkillRoots();
     orderedRoots.forEach(root => {
       if (!fs.existsSync(root)) return;
       const skillDirs = listSkillDirs(root);
       skillDirs.forEach(dir => {
-        const skill = this.parseSkillDir(dir, state, defaults, builtInSkillIds.has(path.basename(dir)));
+        const isOpenSquillaSkill = openSquillaSkillRoots.some(openSquillaRoot => (
+          this.isPathInsideRoot(dir, openSquillaRoot)
+        ));
+        const skill = this.parseSkillDir(
+          dir,
+          state,
+          defaults,
+          builtInSkillIds.has(path.basename(dir)) || isOpenSquillaSkill,
+        );
         if (!skill) return;
         skillMap.set(skill.id, skill);
       });
@@ -2275,12 +2286,47 @@ export class SkillManager {
     if (appRoot !== resolvedPrimary && fs.existsSync(appRoot)) {
       roots.push(appRoot);
     }
+
+    roots.push(...this.getOpenSquillaSkillRoots().filter(root => fs.existsSync(root)));
     return roots;
   }
 
   private getClaudeSkillsRoot(): string | null {
     const homeDir = app.getPath('home');
     return path.join(homeDir, CLAUDE_SKILLS_DIR_NAME, CLAUDE_SKILLS_SUBDIR);
+  }
+
+  private getOpenSquillaSkillsRoot(): string | null {
+    const homeDir = app.getPath('home');
+    return path.join(homeDir, OPENSQUILLA_SKILLS_DIR_NAME, OPENSQUILLA_SKILLS_SUBDIR);
+  }
+
+  private getOpenSquillaSkillRoots(): string[] {
+    const root = this.getOpenSquillaSkillsRoot();
+    if (!root || !fs.existsSync(root)) return [];
+    const roots = [root];
+    try {
+      const childRoots = fs.readdirSync(root)
+        .map(entry => path.join(root, entry))
+        .filter(candidate => {
+          try {
+            const stat = fs.lstatSync(candidate);
+            return stat.isDirectory() && !fs.existsSync(path.join(candidate, SKILL_FILE_NAME));
+          } catch {
+            return false;
+          }
+        });
+      roots.push(...childRoots);
+    } catch (error) {
+      console.warn('[skills] Failed to inspect OpenSquilla skills root:', error);
+    }
+    return roots;
+  }
+
+  private isPathInsideRoot(candidate: string, root: string): boolean {
+    const resolvedCandidate = path.resolve(candidate);
+    const resolvedRoot = path.resolve(root);
+    return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(resolvedRoot + path.sep);
   }
 
   private getBundledSkillsRoot(): string {

@@ -25,10 +25,16 @@ import {
   isCoworkSessionKind,
   isDeepSeekTuiPermissionMode,
   isExternalAgentConfigSource,
+  isKimiCodePermissionMode,
   isOpenCodePermissionMode,
+  isOpenSquillaPermissionMode,
   isQwenCodePermissionMode,
+  KimiCodePermissionMode,
+  type KimiCodePermissionMode as KimiCodePermissionModeType,
   OpenCodePermissionMode,
   type OpenCodePermissionMode as OpenCodePermissionModeType,
+  OpenSquillaPermissionMode,
+  type OpenSquillaPermissionMode as OpenSquillaPermissionModeType,
   QwenCodePermissionMode,
   type QwenCodePermissionMode as QwenCodePermissionModeType,
 } from '../shared/cowork/constants';
@@ -83,6 +89,10 @@ const DEFAULT_CLAUDE_CODE_PERMISSION_MODE: ClaudeCodePermissionModeType = Claude
 const DEFAULT_OPENCODE_PERMISSION_MODE: OpenCodePermissionModeType = OpenCodePermissionMode.Auto;
 const DEFAULT_QWEN_CODE_PERMISSION_MODE: QwenCodePermissionModeType = QwenCodePermissionMode.Auto;
 const DEFAULT_DEEPSEEK_TUI_PERMISSION_MODE: DeepSeekTuiPermissionModeType = DeepSeekTuiPermissionMode.Auto;
+const DEFAULT_OPENSQUILLA_CONFIG_SOURCE: ExternalAgentConfigSourceType = ExternalAgentConfigSource.LocalCli;
+const DEFAULT_OPENSQUILLA_PERMISSION_MODE: OpenSquillaPermissionModeType = OpenSquillaPermissionMode.Bypass;
+const DEFAULT_KIMI_CODE_CONFIG_SOURCE: ExternalAgentConfigSourceType = ExternalAgentConfigSource.LocalCli;
+const DEFAULT_KIMI_CODE_PERMISSION_MODE: KimiCodePermissionModeType = KimiCodePermissionMode.Auto;
 const MIN_MEMORY_USER_MEMORIES_MAX_ITEMS = 1;
 const MAX_MEMORY_USER_MEMORIES_MAX_ITEMS = 60;
 const MEMORY_NEAR_DUPLICATE_MIN_SCORE = 0.82;
@@ -536,6 +546,34 @@ function normalizeDeepSeekTuiPermissionMode(value?: string | null): DeepSeekTuiP
   return DEFAULT_DEEPSEEK_TUI_PERMISSION_MODE;
 }
 
+function normalizeOpenSquillaConfigSource(value?: string | null): ExternalAgentConfigSourceType {
+  if (isExternalAgentConfigSource(value)) {
+    return value;
+  }
+  return DEFAULT_OPENSQUILLA_CONFIG_SOURCE;
+}
+
+function normalizeOpenSquillaPermissionMode(value?: string | null): OpenSquillaPermissionModeType {
+  if (isOpenSquillaPermissionMode(value)) {
+    return value;
+  }
+  return DEFAULT_OPENSQUILLA_PERMISSION_MODE;
+}
+
+function normalizeKimiCodeConfigSource(value?: string | null): ExternalAgentConfigSourceType {
+  if (isExternalAgentConfigSource(value)) {
+    return value;
+  }
+  return DEFAULT_KIMI_CODE_CONFIG_SOURCE;
+}
+
+function normalizeKimiCodePermissionMode(value?: string | null): KimiCodePermissionModeType {
+  if (isKimiCodePermissionMode(value)) {
+    return value;
+  }
+  return DEFAULT_KIMI_CODE_PERMISSION_MODE;
+}
+
 export interface CoworkMessageMetadata {
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -677,6 +715,8 @@ export interface CoworkConfig {
   systemPrompt: string;
   executionMode: CoworkExecutionMode;
   agentEngine: CoworkAgentEngine;
+  clawAgentGatewayUrl: string;
+  clawAgentToken: string;
   openclawConfigSource: ExternalAgentConfigSourceType;
   claudeCodeConfigSource: ExternalAgentConfigSourceType;
   claudeCodePermissionMode: ClaudeCodePermissionModeType;
@@ -688,6 +728,10 @@ export interface CoworkConfig {
   qwenCodePermissionMode: QwenCodePermissionModeType;
   deepseekTuiConfigSource: ExternalAgentConfigSourceType;
   deepseekTuiPermissionMode: DeepSeekTuiPermissionModeType;
+  opensquillaConfigSource: ExternalAgentConfigSourceType;
+  opensquillaPermissionMode: OpenSquillaPermissionModeType;
+  kimiCodeConfigSource: ExternalAgentConfigSourceType;
+  kimiCodePermissionMode: KimiCodePermissionModeType;
   memoryEnabled: boolean;
   memoryImplicitUpdateEnabled: boolean;
   memoryLlmJudgeEnabled: boolean;
@@ -700,6 +744,8 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'workingDirectory'
   | 'executionMode'
   | 'agentEngine'
+  | 'clawAgentGatewayUrl'
+  | 'clawAgentToken'
   | 'openclawConfigSource'
   | 'claudeCodeConfigSource'
   | 'claudeCodePermissionMode'
@@ -711,6 +757,10 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'qwenCodePermissionMode'
   | 'deepseekTuiConfigSource'
   | 'deepseekTuiPermissionMode'
+  | 'opensquillaConfigSource'
+  | 'opensquillaPermissionMode'
+  | 'kimiCodeConfigSource'
+  | 'kimiCodePermissionMode'
   | 'memoryEnabled'
   | 'memoryImplicitUpdateEnabled'
   | 'memoryLlmJudgeEnabled'
@@ -1806,6 +1856,8 @@ export class CoworkStore {
         'workingDirectory',
         'executionMode',
         'agentEngine',
+        'clawAgentGatewayUrl',
+        'clawAgentToken',
         'openclawConfigSource',
         'claudeCodeConfigSource',
         'claudeCodePermissionMode',
@@ -1817,6 +1869,10 @@ export class CoworkStore {
         'qwenCodePermissionMode',
         'deepseekTuiConfigSource',
         'deepseekTuiPermissionMode',
+        'opensquillaConfigSource',
+        'opensquillaPermissionMode',
+        'kimiCodeConfigSource',
+        'kimiCodePermissionMode',
         'memoryEnabled',
         'memoryImplicitUpdateEnabled',
         'memoryLlmJudgeEnabled',
@@ -1834,6 +1890,8 @@ export class CoworkStore {
         systemPrompt: getDefaultSystemPrompt(),
         executionMode: 'local' as CoworkExecutionMode,
         agentEngine: normalizeCoworkAgentEngineValue(cfg.get('agentEngine')),
+        clawAgentGatewayUrl: cfg.get('clawAgentGatewayUrl') || '',
+        clawAgentToken: cfg.get('clawAgentToken') || '',
         openclawConfigSource: normalizeOpenClawConfigSource(cfg.get('openclawConfigSource')),
         claudeCodeConfigSource: normalizeExternalAgentConfigSource(cfg.get('claudeCodeConfigSource')),
         claudeCodePermissionMode: normalizeClaudeCodePermissionMode(cfg.get('claudeCodePermissionMode')),
@@ -1845,6 +1903,10 @@ export class CoworkStore {
         qwenCodePermissionMode: normalizeQwenCodePermissionMode(cfg.get('qwenCodePermissionMode')),
         deepseekTuiConfigSource: normalizeExternalAgentConfigSource(cfg.get('deepseekTuiConfigSource')),
         deepseekTuiPermissionMode: normalizeDeepSeekTuiPermissionMode(cfg.get('deepseekTuiPermissionMode')),
+        opensquillaConfigSource: normalizeOpenSquillaConfigSource(cfg.get('opensquillaConfigSource')),
+        opensquillaPermissionMode: normalizeOpenSquillaPermissionMode(cfg.get('opensquillaPermissionMode')),
+        kimiCodeConfigSource: normalizeKimiCodeConfigSource(cfg.get('kimiCodeConfigSource')),
+        kimiCodePermissionMode: normalizeKimiCodePermissionMode(cfg.get('kimiCodePermissionMode')),
         memoryEnabled: parseBooleanConfig(cfg.get('memoryEnabled'), DEFAULT_MEMORY_ENABLED),
         memoryImplicitUpdateEnabled: parseBooleanConfig(
           cfg.get('memoryImplicitUpdateEnabled'),
@@ -1875,6 +1937,12 @@ export class CoworkStore {
       }
       if (config.agentEngine !== undefined) {
         entries.push(['agentEngine', normalizeCoworkAgentEngineValue(config.agentEngine)]);
+      }
+      if (config.clawAgentGatewayUrl !== undefined) {
+        entries.push(['clawAgentGatewayUrl', config.clawAgentGatewayUrl]);
+      }
+      if (config.clawAgentToken !== undefined) {
+        entries.push(['clawAgentToken', config.clawAgentToken]);
       }
       if (config.openclawConfigSource !== undefined) {
         entries.push(['openclawConfigSource', normalizeExternalAgentConfigSource(config.openclawConfigSource)]);
@@ -1908,6 +1976,18 @@ export class CoworkStore {
       }
       if (config.deepseekTuiPermissionMode !== undefined) {
         entries.push(['deepseekTuiPermissionMode', normalizeDeepSeekTuiPermissionMode(config.deepseekTuiPermissionMode)]);
+      }
+      if (config.opensquillaConfigSource !== undefined) {
+        entries.push(['opensquillaConfigSource', normalizeOpenSquillaConfigSource(config.opensquillaConfigSource)]);
+      }
+      if (config.opensquillaPermissionMode !== undefined) {
+        entries.push(['opensquillaPermissionMode', normalizeOpenSquillaPermissionMode(config.opensquillaPermissionMode)]);
+      }
+      if (config.kimiCodeConfigSource !== undefined) {
+        entries.push(['kimiCodeConfigSource', normalizeKimiCodeConfigSource(config.kimiCodeConfigSource)]);
+      }
+      if (config.kimiCodePermissionMode !== undefined) {
+        entries.push(['kimiCodePermissionMode', normalizeKimiCodePermissionMode(config.kimiCodePermissionMode)]);
       }
       if (config.memoryEnabled !== undefined) {
         entries.push(['memoryEnabled', config.memoryEnabled ? '1' : '0']);

@@ -20,6 +20,7 @@ import ClaudePermissionModeSelector from './ClaudePermissionModeSelector';
 import CoworkEngineSelector from './CoworkEngineSelector';
 import CoworkModelSelector from './CoworkModelSelector';
 import FolderSelectorPopover from './FolderSelectorPopover';
+import KimiPermissionModeSelector from './KimiPermissionModeSelector';
 
 // CoworkAttachment is aliased from the Redux-persisted DraftAttachment type
 // so that attachment state survives view switches (cowork ↔ skills, etc.)
@@ -69,6 +70,7 @@ const getSlashCommandsForEngine = (engine: CoworkAgentEngine | undefined): Slash
     || engine === CoworkAgentEngine.GrokBuild
     || engine === CoworkAgentEngine.QwenCode
     || engine === CoworkAgentEngine.DeepSeekTui
+    || engine === CoworkAgentEngine.KimiCode
   ) {
     return SUPPORTED_COWORK_SLASH_COMMANDS;
   }
@@ -818,11 +820,15 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     || lockedRuntimeSnapshot?.modelName
     || lockedRuntimeSnapshot?.modelId
     || i18nService.t('coworkAgentLocalModelUnknown');
-  const lockedPermissionLabel = lockedRuntimeSnapshot?.permissionMode
-    ? i18nService.t(`coworkAgentClaudeCodePermissionMode_${lockedRuntimeSnapshot.permissionMode}`)
-    : lockedRuntimeSnapshot?.permissionModeLabel;
+  const lockedPermissionLabel = lockedRuntimeSnapshot?.permissionModeLabel
+    || (lockedRuntimeSnapshot?.permissionMode
+      ? i18nService.t(`coworkAgentClaudeCodePermissionMode_${lockedRuntimeSnapshot.permissionMode}`)
+      : null);
   const shouldShowClaudePermissionSelector = !runtimeLocked
     && selectorEngine === CoworkAgentEngine.ClaudeCode
+    && !remoteManaged;
+  const shouldShowKimiPermissionSelector = !runtimeLocked
+    && selectorEngine === CoworkAgentEngine.KimiCode
     && !remoteManaged;
   const renderRuntimeSelectors = () => {
     if (remoteManaged) return null;
@@ -855,6 +861,12 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       <div className="flex min-w-0 items-center gap-1.5">
         {shouldShowClaudePermissionSelector && (
           <ClaudePermissionModeSelector
+            dropdownDirection="up"
+            disabled={disabled || isStreaming}
+          />
+        )}
+        {shouldShowKimiPermissionSelector && (
+          <KimiPermissionModeSelector
             dropdownDirection="up"
             disabled={disabled || isStreaming}
           />

@@ -24,7 +24,7 @@ import {
 } from './hermesConfig';
 import { readOpenClawGlobalConfig, summarizeOpenClawConfig } from './openclawSystemRuntime';
 
-export type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
+export type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui' | 'opensquilla' | 'kimi';
 export type CliAuthStatus = 'unknown' | 'logged_out' | 'logged_in' | 'expired' | 'unconfigured';
 
 export interface CliAppConfigSnapshot {
@@ -263,6 +263,12 @@ const getQwenCodeConfigDir = (): string => path.join(homeDir(), '.qwen');
 
 const getDeepSeekTuiConfigDir = (): string => path.join(homeDir(), '.deepseek');
 
+const getOpenSquillaConfigDir = (): string => path.join(homeDir(), '.opensquilla');
+
+const getKimiCodeConfigDir = (): string => path.join(homeDir(), '.kimi-code');
+
+const getKimiSdkConfigDir = (): string => path.join(homeDir(), '.kimi');
+
 const getNestedRecord = (value: unknown, key: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const nested = (value as Record<string, unknown>)[key];
@@ -278,6 +284,14 @@ const getString = (value: unknown): string => {
 const extractTomlString = (configText: string, key: string): string => {
   const match = configText.match(new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']*)["']`, 'm'));
   return match?.[1]?.trim() ?? '';
+};
+
+const readTomlTableBody = (configText: string, tableName: string): string => {
+  const escapedTableName = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = configText.match(
+    new RegExp(`^\\s*\\[${escapedTableName}\\]\\s*\\r?\\n([\\s\\S]*?)(?=\\r?\\n\\s*\\[|$)`, 'm'),
+  );
+  return match?.[1] ?? '';
 };
 
 const normalizeTomlTableKey = (value: string): string => {
@@ -468,6 +482,53 @@ const readOpenClawConfigSummary = (
   };
 };
 
+const readOpenSquillaConfigSummary = (
+  configPath: string,
+  secondaryConfigPaths: string[],
+): CliConfigSummary => {
+  const configText = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  const llmBody = readTomlTableBody(configText, 'llm');
+  const providerRoutingBody = readTomlTableBody(configText, 'llm.provider_routing');
+  const provider = extractTomlString(llmBody, 'provider')
+    || extractTomlString(providerRoutingBody, 'provider')
+    || extractTomlString(configText, 'llm.provider')
+    || extractTomlString(configText, 'provider')
+    || extractTomlString(configText, 'model_provider')
+    || extractTomlString(configText, 'router');
+  const model = extractTomlString(llmBody, 'model')
+    || extractTomlString(providerRoutingBody, 'model')
+    || extractTomlString(configText, 'llm.model')
+    || extractTomlString(configText, 'model')
+    || extractTomlString(configText, 'default_model')
+    || extractTomlString(configText, 'model_id');
+  const providerName = provider && model ? `${provider}/${model}` : provider || model || null;
+  const hasConfig = Boolean(configText.trim()) || secondaryConfigPaths.some((filePath) => fs.existsSync(filePath));
+  return {
+    providerId: provider || (hasConfig ? 'local-cli' : null),
+    providerName: providerName || (hasConfig ? 'Local OpenSquilla' : null),
+    count: hasConfig ? 1 : 0,
+  };
+};
+
+const readKimiCodeConfigSummary = (
+  configPath: string,
+  secondaryConfigPaths: string[],
+): CliConfigSummary => {
+  const configText = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  const defaultModel = extractTomlString(configText, 'default_model')
+    || extractTomlString(configText, 'defaultModel')
+    || extractTomlString(configText, 'model');
+  const provider = extractTomlString(configText, 'provider')
+    || extractTomlString(configText, 'model_provider');
+  const modelCount = (configText.match(/^\s*\[\[?models(?:\.|\])|^\s*\[models\./gm) ?? []).length;
+  const hasConfig = Boolean(configText.trim()) || secondaryConfigPaths.some((filePath) => fs.existsSync(filePath));
+  return {
+    providerId: provider || (hasConfig ? 'local-cli' : null),
+    providerName: defaultModel || provider || (hasConfig ? 'Local Kimi Code' : null),
+    count: modelCount || (hasConfig ? 1 : 0),
+  };
+};
+
 interface CliAuthSummary {
   authStatus: CliAuthStatus;
   authSource: string | null;
@@ -483,6 +544,8 @@ const localEnvKeysByAppType: Record<CliAppType, string[]> = {
   grok: ['GROK_API_KEY', 'XAI_API_KEY', 'X_AI_API_KEY'],
   qwen: ['DASHSCOPE_API_KEY', 'QWEN_API_KEY'],
   deepseek_tui: ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY'],
+  opensquilla: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'QWEN_API_KEY', 'MOONSHOT_API_KEY', 'ZAI_API_KEY', 'Z_AI_API_KEY'],
+  kimi: ['MOONSHOT_API_KEY', 'KIMI_API_KEY'],
 };
 
 const formatAuthSource = (filePath: string): string => (
@@ -522,6 +585,19 @@ const buildAuthPathCandidates = (
     return [
       ...common,
       path.join(configDir, 'oauth_creds.json'),
+    ];
+  }
+  if (appType === 'kimi') {
+    const sdkDir = getKimiSdkConfigDir();
+    return [
+      ...common,
+      path.join(configDir, 'auth.json'),
+      path.join(configDir, 'credentials.json'),
+      path.join(configDir, 'oauth.json'),
+      path.join(sdkDir, 'config.toml'),
+      path.join(sdkDir, 'auth.json'),
+      path.join(sdkDir, 'credentials.json'),
+      path.join(sdkDir, 'oauth.json'),
     ];
   }
   return common;
@@ -587,7 +663,7 @@ const readCurrentProviderFromDb = (
   appType: CliAppType,
   settingsCurrentProviderId: string | null,
 ): { provider: ProviderRow | null; count: number } => {
-  if (appType === 'openclaw' || appType === 'opencode' || appType === 'grok' || appType === 'qwen' || appType === 'deepseek_tui') {
+  if (appType === 'openclaw' || appType === 'opencode' || appType === 'grok' || appType === 'qwen' || appType === 'deepseek_tui' || appType === 'opensquilla' || appType === 'kimi') {
     return { provider: null, count: 0 };
   }
   if (!fs.existsSync(dbPath)) {
@@ -778,6 +854,19 @@ const getWindowsSearchPaths = (command: string): string[] => {
       path.join(appData, 'npm', 'deepseek-tui.cmd'),
     ];
   }
+  if (command === 'opensquilla') {
+    return [
+      path.join(home, '.local', 'bin', 'opensquilla.exe'),
+      path.join(home, '.local', 'bin', 'opensquilla'),
+    ];
+  }
+  if (command === 'kimi') {
+    return [
+      path.join(appData, 'npm', 'kimi.cmd'),
+      path.join(home, '.local', 'bin', 'kimi.exe'),
+      path.join(home, '.local', 'bin', 'kimi'),
+    ];
+  }
 
   return [];
 };
@@ -905,7 +994,13 @@ const buildCliConfigSnapshot = (
         ? getGrokBuildConfigDir()
         : appType === 'qwen'
           ? getQwenCodeConfigDir()
-          : getDeepSeekTuiConfigDir();
+          : appType === 'deepseek_tui'
+            ? getDeepSeekTuiConfigDir()
+            : appType === 'opensquilla'
+              ? getOpenSquillaConfigDir()
+              : fs.existsSync(path.join(getKimiCodeConfigDir(), 'config.toml'))
+                ? getKimiCodeConfigDir()
+                : getKimiSdkConfigDir();
   const primaryConfigPath = appType === 'claude'
     ? resolveClaudeSettingsPath(configDir)
     : appType === 'codex'
@@ -920,7 +1015,11 @@ const buildCliConfigSnapshot = (
         ? path.join(configDir, 'config.toml')
         : appType === 'qwen'
           ? path.join(configDir, 'settings.json')
-          : path.join(configDir, 'config.toml');
+          : appType === 'deepseek_tui'
+            ? path.join(configDir, 'config.toml')
+            : appType === 'opensquilla'
+              ? path.join(configDir, 'config.toml')
+              : path.join(configDir, 'config.toml');
   const secondaryConfigPaths = appType === 'claude'
     ? [resolveClaudeMcpPath(configDir, Boolean(claudeOverride))]
     : appType === 'codex'
@@ -935,7 +1034,21 @@ const buildCliConfigSnapshot = (
         ? [path.join(configDir, 'auth.json')]
         : appType === 'qwen'
           ? [path.join(configDir, 'oauth_creds.json')]
-          : [path.join(configDir, 'sessions')];
+          : appType === 'deepseek_tui'
+            ? [path.join(configDir, 'sessions')]
+            : appType === 'opensquilla'
+              ? [path.join(configDir, 'opensquilla.toml'), path.join(configDir, '.env'), path.join(configDir, 'state')]
+              : [
+                path.join(configDir, 'session_index.jsonl'),
+                path.join(configDir, 'skills'),
+                path.join(configDir, 'mcp.json'),
+                path.join(getKimiCodeConfigDir(), 'config.toml'),
+                path.join(getKimiCodeConfigDir(), 'session_index.jsonl'),
+                path.join(getKimiCodeConfigDir(), 'skills'),
+                path.join(getKimiSdkConfigDir(), 'config.toml'),
+                path.join(getKimiSdkConfigDir(), 'session_index.jsonl'),
+                path.join(getKimiSdkConfigDir(), 'skills'),
+              ];
   const settingsCurrentProviderId = getCurrentProviderSetting(settings, appType);
   if (appType === 'opencode') {
     const summary = readOpenCodeConfigSummary(primaryConfigPath);
@@ -1004,6 +1117,32 @@ const buildCliConfigSnapshot = (
   }
   if (appType === 'deepseek_tui') {
     const summary = readDeepSeekTuiConfigSummary(primaryConfigPath);
+    return {
+      appType,
+      configDir,
+      primaryConfigPath,
+      secondaryConfigPaths,
+      configExists: fs.existsSync(primaryConfigPath),
+      currentProviderId: summary.providerId,
+      currentProviderName: summary.providerName,
+      providerCount: summary.count,
+    };
+  }
+  if (appType === 'opensquilla') {
+    const summary = readOpenSquillaConfigSummary(primaryConfigPath, secondaryConfigPaths);
+    return {
+      appType,
+      configDir,
+      primaryConfigPath,
+      secondaryConfigPaths,
+      configExists: fs.existsSync(primaryConfigPath),
+      currentProviderId: summary.providerId,
+      currentProviderName: summary.providerName,
+      providerCount: summary.count,
+    };
+  }
+  if (appType === 'kimi') {
+    const summary = readKimiCodeConfigSummary(primaryConfigPath, secondaryConfigPaths);
     return {
       appType,
       configDir,
@@ -1109,6 +1248,8 @@ const AGENT_ENGINE_COMMANDS = [
   { engine: CoworkAgentEngine.GrokBuild, appType: 'grok', command: 'grok' },
   { engine: CoworkAgentEngine.QwenCode, appType: 'qwen', command: 'qwen' },
   { engine: CoworkAgentEngine.DeepSeekTui, appType: 'deepseek_tui', command: 'deepseek-tui' },
+  { engine: CoworkAgentEngine.OpenSquilla, appType: 'opensquilla', command: 'opensquilla' },
+  { engine: CoworkAgentEngine.KimiCode, appType: 'kimi', command: 'kimi' },
 ] as const satisfies Array<{ engine: CliCoworkAgentEngine; appType: CliAppType; command: string }>;
 
 const listAgentEngineCommands = (

@@ -128,6 +128,8 @@ const OPENCODE_APP_TYPE: ExternalAgentProviderAppType = 'opencode';
 const GROK_APP_TYPE: ExternalAgentProviderAppType = 'grok';
 const QWEN_APP_TYPE: ExternalAgentProviderAppType = 'qwen';
 const DEEPSEEK_TUI_APP_TYPE: ExternalAgentProviderAppType = 'deepseek_tui';
+const OPENSQUILLA_APP_TYPE: ExternalAgentProviderAppType = 'opensquilla';
+const KIMI_APP_TYPE: ExternalAgentProviderAppType = 'kimi';
 const INTERNAL_META_KEY = '__wesightProviderMeta';
 
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-5';
@@ -138,6 +140,8 @@ const DEFAULT_OPENCODE_LOCAL_MODEL = DEFAULT_OPENCODE_MODEL;
 const DEFAULT_GROK_LOCAL_MODEL = DEFAULT_GROK_BUILD_MODEL;
 const DEFAULT_QWEN_CODE_LOCAL_MODEL = DEFAULT_QWEN_CODE_MODEL;
 const DEFAULT_DEEPSEEK_TUI_LOCAL_MODEL = DEFAULT_DEEPSEEK_TUI_MODEL;
+const DEFAULT_OPENSQUILLA_LOCAL_MODEL = 'local-opensquilla';
+const DEFAULT_KIMI_CODE_LOCAL_MODEL = 'local-kimi-code';
 
 const homeDir = (): string => os.homedir();
 
@@ -215,6 +219,12 @@ const getQwenCodeSettingsPath = (): string => path.join(getQwenCodeConfigDir(), 
 const getQwenCodeOauthPath = (): string => path.join(getQwenCodeConfigDir(), 'oauth_creds.json');
 const getDeepSeekTuiConfigDir = (): string => path.join(homeDir(), '.deepseek');
 const getDeepSeekTuiConfigPath = (): string => path.join(getDeepSeekTuiConfigDir(), 'config.toml');
+const getOpenSquillaConfigDir = (): string => path.join(homeDir(), '.opensquilla');
+const getOpenSquillaConfigPath = (): string => path.join(getOpenSquillaConfigDir(), 'config.toml');
+const getKimiCodeConfigDir = (): string => path.join(homeDir(), '.kimi-code');
+const getKimiSdkConfigDir = (): string => path.join(homeDir(), '.kimi');
+const getKimiCodeConfigPath = (): string => path.join(getKimiCodeConfigDir(), 'config.toml');
+const getKimiSdkConfigPath = (): string => path.join(getKimiSdkConfigDir(), 'config.toml');
 
 const getLiveConfigPaths = (appType: ExternalAgentProviderAppType): ExternalAgentProviderListResult['liveConfigPaths'] => {
   if (appType === CLAUDE_APP_TYPE) {
@@ -257,6 +267,24 @@ const getLiveConfigPaths = (appType: ExternalAgentProviderAppType): ExternalAgen
     return {
       primaryConfigPath: getDeepSeekTuiConfigPath(),
       secondaryConfigPaths: [path.join(getDeepSeekTuiConfigDir(), 'sessions')],
+    };
+  }
+  if (appType === OPENSQUILLA_APP_TYPE) {
+    return {
+      primaryConfigPath: getOpenSquillaConfigPath(),
+      secondaryConfigPaths: [path.join(getOpenSquillaConfigDir(), '.env'), path.join(getOpenSquillaConfigDir(), 'state')],
+    };
+  }
+  if (appType === KIMI_APP_TYPE) {
+    return {
+      primaryConfigPath: getKimiCodeConfigPath(),
+      secondaryConfigPaths: [
+        getKimiSdkConfigPath(),
+        path.join(getKimiCodeConfigDir(), 'session_index.jsonl'),
+        path.join(getKimiSdkConfigDir(), 'session_index.jsonl'),
+        path.join(getKimiCodeConfigDir(), 'skills'),
+        path.join(getKimiSdkConfigDir(), 'skills'),
+      ],
     };
   }
   return {
@@ -353,6 +381,67 @@ const extractTomlString = (configText: string, key: string): string => {
   return match?.[1] ?? '';
 };
 
+const readTomlTableBody = (configText: string, tableName: string): string => {
+  const escapedTableName = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = configText.match(
+    new RegExp(`^\\s*\\[${escapedTableName}\\]\\s*\\r?\\n([\\s\\S]*?)(?=\\r?\\n\\s*\\[|$)`, 'm'),
+  );
+  return match?.[1] ?? '';
+};
+
+const summarizeOpenSquillaSettingsConfig = (
+  settingsConfig: Record<string, unknown>,
+): ExternalAgentProviderSummary => {
+  const configText = getString(settingsConfig.config);
+  const llmConfig = getNestedRecord(settingsConfig, 'llm');
+  const llmBody = readTomlTableBody(configText, 'llm');
+  const routingBody = readTomlTableBody(configText, 'llm.provider_routing');
+  const provider = getString(settingsConfig.provider)
+    || getString(llmConfig.provider)
+    || extractTomlString(llmBody, 'provider')
+    || extractTomlString(routingBody, 'provider')
+    || extractTomlString(configText, 'llm.provider')
+    || extractTomlString(configText, 'provider')
+    || extractTomlString(configText, 'model_provider');
+  const model = getString(settingsConfig.model)
+    || getString(llmConfig.model)
+    || extractTomlString(llmBody, 'model')
+    || extractTomlString(routingBody, 'model')
+    || extractTomlString(configText, 'llm.model')
+    || extractTomlString(configText, 'model')
+    || extractTomlString(configText, 'default_model')
+    || DEFAULT_OPENSQUILLA_LOCAL_MODEL;
+  const baseUrl = getString(settingsConfig.baseUrl)
+    || getString(llmConfig.base_url)
+    || extractTomlString(llmBody, 'base_url')
+    || extractTomlString(configText, 'llm.base_url')
+    || extractTomlString(configText, 'base_url');
+  return {
+    apiKey: '',
+    baseUrl,
+    model: provider && model ? `${provider}/${model}` : model,
+  };
+};
+
+const summarizeKimiCodeSettingsConfig = (
+  settingsConfig: Record<string, unknown>,
+): ExternalAgentProviderSummary => {
+  const configText = getString(settingsConfig.config);
+  const defaultModel = getString(settingsConfig.defaultModel)
+    || extractTomlString(configText, 'default_model')
+    || extractTomlString(configText, 'defaultModel')
+    || extractTomlString(configText, 'model')
+    || DEFAULT_KIMI_CODE_LOCAL_MODEL;
+  const provider = getString(settingsConfig.provider)
+    || extractTomlString(configText, 'provider')
+    || extractTomlString(configText, 'model_provider');
+  return {
+    apiKey: '',
+    baseUrl: '',
+    model: provider && defaultModel ? `${provider}/${defaultModel}` : defaultModel,
+  };
+};
+
 const extractCodexProviderBaseUrl = (configText: string): string => {
   const provider = extractTomlString(configText, 'model_provider');
   if (!provider) {
@@ -392,6 +481,12 @@ const summarizeProvider = (
 
   if (appType === DEEPSEEK_TUI_APP_TYPE) {
     return summarizeDeepSeekTuiSettingsConfig(settingsConfig);
+  }
+  if (appType === OPENSQUILLA_APP_TYPE) {
+    return summarizeOpenSquillaSettingsConfig(settingsConfig);
+  }
+  if (appType === KIMI_APP_TYPE) {
+    return summarizeKimiCodeSettingsConfig(settingsConfig);
   }
   if (appType === GROK_APP_TYPE) {
     return {
@@ -500,6 +595,19 @@ const buildSettingsConfigFromInput = (input: ExternalAgentProviderInput): Record
       model: input.model?.trim() || DEFAULT_GROK_LOCAL_MODEL,
     };
   }
+  if (input.appType === OPENSQUILLA_APP_TYPE) {
+    return {
+      model: input.model?.trim() || DEFAULT_OPENSQUILLA_LOCAL_MODEL,
+      provider: input.name.trim() || 'OpenSquilla',
+      baseUrl: input.baseUrl?.trim() || '',
+    };
+  }
+  if (input.appType === KIMI_APP_TYPE) {
+    return {
+      model: input.model?.trim() || DEFAULT_KIMI_CODE_LOCAL_MODEL,
+      provider: input.name.trim() || 'Kimi Code',
+    };
+  }
 
   const model = input.model?.trim() || DEFAULT_CODEX_MODEL;
   return {
@@ -519,6 +627,8 @@ export const appTypeFromEngine = (engine: string): ExternalAgentProviderAppType 
   if (engine === 'grok_build') return GROK_APP_TYPE;
   if (engine === 'qwen_code') return QWEN_APP_TYPE;
   if (engine === 'deepseek_tui') return DEEPSEEK_TUI_APP_TYPE;
+  if (engine === 'opensquilla') return OPENSQUILLA_APP_TYPE;
+  if (engine === 'kimi_code') return KIMI_APP_TYPE;
   return null;
 };
 
@@ -681,6 +791,10 @@ export class ExternalAgentProviderStore {
         ? 'Local Hermes Agent'
       : appType === OPENCLAW_APP_TYPE
         ? 'Local OpenClaw'
+      : appType === OPENSQUILLA_APP_TYPE
+        ? 'Local OpenSquilla'
+      : appType === KIMI_APP_TYPE
+        ? 'Local Kimi Code'
       : appType === OPENCODE_APP_TYPE
         ? 'Local OpenCode'
         : appType === GROK_APP_TYPE
@@ -708,6 +822,9 @@ export class ExternalAgentProviderStore {
       || appType === GROK_APP_TYPE
       || appType === QWEN_APP_TYPE
       || appType === DEEPSEEK_TUI_APP_TYPE
+      || appType === OPENSQUILLA_APP_TYPE
+      || appType === KIMI_APP_TYPE
+      || appType === KIMI_APP_TYPE
     ) {
       return 0;
     }
@@ -785,6 +902,8 @@ export class ExternalAgentProviderStore {
       || appType === GROK_APP_TYPE
       || appType === QWEN_APP_TYPE
       || appType === DEEPSEEK_TUI_APP_TYPE
+      || appType === OPENSQUILLA_APP_TYPE
+      || appType === KIMI_APP_TYPE
     ) return null;
     const settings = readCcSwitchSettings();
     const value = appType === CLAUDE_APP_TYPE
@@ -855,6 +974,8 @@ export class ExternalAgentProviderStore {
       || appType === GROK_APP_TYPE
       || appType === QWEN_APP_TYPE
       || appType === DEEPSEEK_TUI_APP_TYPE
+      || appType === OPENSQUILLA_APP_TYPE
+      || appType === KIMI_APP_TYPE
     ) return;
     const providerId = this.getCcSwitchProviderId(provider);
     if (!providerId) return;
@@ -899,6 +1020,7 @@ export class ExternalAgentProviderStore {
       || appType === GROK_APP_TYPE
       || appType === QWEN_APP_TYPE
       || appType === DEEPSEEK_TUI_APP_TYPE
+      || appType === OPENSQUILLA_APP_TYPE
     ) return;
     const currentProviderId = this.getCcSwitchCurrentProviderId(appType);
     const currentProvider = currentProviderId
@@ -956,6 +1078,14 @@ export class ExternalAgentProviderStore {
     }
     if (appType === GROK_APP_TYPE) {
       this.importLiveProviderIfEmpty(appType);
+      return;
+    }
+    if (appType === OPENSQUILLA_APP_TYPE) {
+      this.refreshLiveProviderSnapshot(appType);
+      return;
+    }
+    if (appType === KIMI_APP_TYPE) {
+      this.refreshLiveProviderSnapshot(appType);
       return;
     }
     const hasCurrent = Boolean(this.getCurrentProviderId(appType));
@@ -1289,6 +1419,56 @@ export class ExternalAgentProviderStore {
         model: config.default_text_model ?? DEFAULT_DEEPSEEK_TUI_LOCAL_MODEL,
       };
     }
+    if (appType === OPENSQUILLA_APP_TYPE) {
+      if (!fs.existsSync(getOpenSquillaConfigPath())) return null;
+      const configText = fs.readFileSync(getOpenSquillaConfigPath(), 'utf8');
+      const llmBody = readTomlTableBody(configText, 'llm');
+      const provider = extractTomlString(llmBody, 'provider')
+        || extractTomlString(configText, 'llm.provider')
+        || extractTomlString(configText, 'provider');
+      const model = extractTomlString(llmBody, 'model')
+        || extractTomlString(configText, 'llm.model')
+        || extractTomlString(configText, 'model')
+        || DEFAULT_OPENSQUILLA_LOCAL_MODEL;
+      const baseUrl = extractTomlString(llmBody, 'base_url')
+        || extractTomlString(configText, 'llm.base_url')
+        || extractTomlString(configText, 'base_url');
+      return {
+        config: configText,
+        provider,
+        baseUrl,
+        model,
+        llm: {
+          provider,
+          model,
+          base_url: baseUrl,
+        },
+      };
+    }
+    if (appType === KIMI_APP_TYPE) {
+      const primaryPath = fs.existsSync(getKimiCodeConfigPath())
+        ? getKimiCodeConfigPath()
+        : getKimiSdkConfigPath();
+      const configText = fs.existsSync(primaryPath) ? fs.readFileSync(primaryPath, 'utf8') : '';
+      const skillsDir = fs.existsSync(path.join(getKimiCodeConfigDir(), 'skills'))
+        ? path.join(getKimiCodeConfigDir(), 'skills')
+        : path.join(getKimiSdkConfigDir(), 'skills');
+      if (!configText.trim() && !fs.existsSync(skillsDir)) return null;
+      const defaultModel = extractTomlString(configText, 'default_model')
+        || extractTomlString(configText, 'defaultModel')
+        || extractTomlString(configText, 'model')
+        || DEFAULT_KIMI_CODE_LOCAL_MODEL;
+      const provider = extractTomlString(configText, 'provider')
+        || extractTomlString(configText, 'model_provider')
+        || 'kimi';
+      return {
+        config: configText,
+        provider,
+        defaultModel,
+        model: defaultModel,
+        skillsDir,
+      };
+    }
     const auth = readJsonObject(getCodexAuthPath()) ?? {};
     const configPath = getCodexConfigPath();
     const config = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
@@ -1438,6 +1618,9 @@ export class ExternalAgentProviderStore {
         default_text_model: selectedModel,
       };
       atomicWrite(getDeepSeekTuiConfigPath(), serializeDeepSeekTuiConfig(nextConfig));
+      return;
+    }
+    if (provider.appType === OPENSQUILLA_APP_TYPE || provider.appType === KIMI_APP_TYPE) {
       return;
     }
 

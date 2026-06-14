@@ -4,7 +4,9 @@ import type {
   CoworkSessionKind,
   DeepSeekTuiPermissionMode,
   ExternalAgentConfigSource,
+  KimiCodePermissionMode,
   OpenCodePermissionMode,
+  OpenSquillaPermissionMode,
   QwenCodePermissionMode,
 } from '@shared/cowork/constants';
 import type { CoworkFileActivity } from '@shared/cowork/fileActivity';
@@ -100,6 +102,8 @@ interface CoworkConfig {
   systemPrompt: string;
   executionMode: 'auto' | 'local' | 'sandbox';
   agentEngine: CoworkAgentEngine;
+  clawAgentGatewayUrl: string;
+  clawAgentToken: string;
   openclawConfigSource: ExternalAgentConfigSource;
   claudeCodeConfigSource: ExternalAgentConfigSource;
   claudeCodePermissionMode: ClaudeCodePermissionMode;
@@ -111,6 +115,10 @@ interface CoworkConfig {
   qwenCodePermissionMode: QwenCodePermissionMode;
   deepseekTuiConfigSource: ExternalAgentConfigSource;
   deepseekTuiPermissionMode: DeepSeekTuiPermissionMode;
+  opensquillaConfigSource: ExternalAgentConfigSource;
+  opensquillaPermissionMode: OpenSquillaPermissionMode;
+  kimiCodeConfigSource: ExternalAgentConfigSource;
+  kimiCodePermissionMode: KimiCodePermissionMode;
   memoryEnabled: boolean;
   memoryImplicitUpdateEnabled: boolean;
   memoryLlmJudgeEnabled: boolean;
@@ -123,6 +131,8 @@ type CoworkConfigUpdate = Partial<Pick<
   | 'workingDirectory'
   | 'executionMode'
   | 'agentEngine'
+  | 'clawAgentGatewayUrl'
+  | 'clawAgentToken'
   | 'openclawConfigSource'
   | 'claudeCodeConfigSource'
   | 'claudeCodePermissionMode'
@@ -134,6 +144,10 @@ type CoworkConfigUpdate = Partial<Pick<
   | 'qwenCodePermissionMode'
   | 'deepseekTuiConfigSource'
   | 'deepseekTuiPermissionMode'
+  | 'opensquillaConfigSource'
+  | 'opensquillaPermissionMode'
+  | 'kimiCodeConfigSource'
+  | 'kimiCodePermissionMode'
   | 'memoryEnabled'
   | 'memoryImplicitUpdateEnabled'
   | 'memoryLlmJudgeEnabled'
@@ -141,7 +155,7 @@ type CoworkConfigUpdate = Partial<Pick<
   | 'memoryUserMemoriesMaxItems'
 >>;
 
-type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
+type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui' | 'opensquilla' | 'kimi';
 type CliAuthStatus = 'unknown' | 'logged_out' | 'logged_in' | 'expired' | 'unconfigured';
 
 interface CliAppConfigSnapshot {
@@ -156,7 +170,7 @@ interface CliAppConfigSnapshot {
 }
 
 interface CliCommandStatus {
-  engine: Extract<CoworkAgentEngine, 'openclaw' | 'claude_code' | 'codex' | 'hermes' | 'opencode' | 'grok_build' | 'qwen_code' | 'deepseek_tui'>;
+  engine: Extract<CoworkAgentEngine, 'openclaw' | 'claude_code' | 'codex' | 'hermes' | 'opencode' | 'grok_build' | 'qwen_code' | 'deepseek_tui' | 'opensquilla'>;
   appType: CliAppType;
   command: string;
   found: boolean;
@@ -777,6 +791,15 @@ interface IElectronAPI {
     openPath: (filePath: string) => Promise<{ success: boolean; error?: string }>;
     showItemInFolder: (filePath: string) => Promise<{ success: boolean; error?: string }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+  };
+  openSquillaControl: {
+    probe: () => Promise<{ reachable: boolean; status?: number; url: string; error?: string; frameBlocked?: boolean }>;
+  };
+  openSquillaGateway: {
+    status: () => Promise<{ success: boolean; action: string; payload?: Record<string, unknown> | null; error?: string }>;
+    start: () => Promise<{ success: boolean; action: string; payload?: Record<string, unknown> | null; error?: string }>;
+    restart: () => Promise<{ success: boolean; action: string; payload?: Record<string, unknown> | null; error?: string }>;
+    stop: () => Promise<{ success: boolean; action: string; payload?: Record<string, unknown> | null; error?: string }>;
   };
   autoLaunch: {
     get: () => Promise<{ enabled: boolean }>;

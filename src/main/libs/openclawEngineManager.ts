@@ -67,6 +67,8 @@ const ensureDir = (dirPath: string): void => {
   fs.mkdirSync(dirPath, { recursive: true });
 };
 
+const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
 const isPortReachable = (host: string, port: number, timeoutMs = 1200): Promise<boolean> => {
   return new Promise((resolve) => {
     const socket = new net.Socket();
@@ -160,6 +162,35 @@ export class OpenClawEngineManager extends EventEmitter {
 
   setSecretEnvVars(vars: Record<string, string>): void {
     this.secretEnvVars = vars;
+  }
+
+  syncLaunchAgentSecretEnvVars(vars: Record<string, string>): void {
+    const envPath = path.join(path.dirname(this.configPath), 'service-env', 'ai.openclaw.gateway.env');
+    if (!fs.existsSync(envPath)) return;
+
+    const beginMarker = '# WeSight managed secrets begin';
+    const endMarker = '# WeSight managed secrets end';
+    try {
+      const current = fs.readFileSync(envPath, 'utf8');
+      const withoutManagedBlock = current
+        .replace(new RegExp(`\\n?${beginMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${endMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g'), '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
+      const entries = Object.entries(vars)
+        .filter(([key, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && value)
+        .sort(([a], [b]) => a.localeCompare(b));
+      const managedBlock = entries.length > 0
+        ? [
+            beginMarker,
+            ...entries.map(([key, value]) => `export ${key}=${shellQuote(value)}`),
+            endMarker,
+          ].join('\n')
+        : '';
+      const next = `${withoutManagedBlock}${managedBlock ? `\n\n${managedBlock}` : ''}\n`;
+      fs.writeFileSync(envPath, next, { encoding: 'utf8', mode: 0o600 });
+    } catch (error) {
+      console.warn('[OpenClaw] failed to sync WeSight secrets into LaunchAgent env file:', error);
+    }
   }
 
   getSecretEnvVars(): Record<string, string> {

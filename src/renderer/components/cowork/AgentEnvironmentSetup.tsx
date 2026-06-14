@@ -106,6 +106,22 @@ const AGENT_SETUP_TARGETS: AgentSetupTarget[] = [
     primary: false,
     recommended: false,
   },
+  {
+    engine: CoworkAgentEngine.OpenSquilla,
+    appType: 'opensquilla',
+    labelKey: 'coworkAgentEngineOpenSquilla',
+    hintKey: 'coworkAgentEngineOpenSquillaHint',
+    primary: false,
+    recommended: false,
+  },
+  {
+    engine: CoworkAgentEngine.KimiCode,
+    appType: 'kimi',
+    labelKey: 'coworkAgentEngineKimiCode',
+    hintKey: 'coworkAgentEngineKimiCodeHint',
+    primary: false,
+    recommended: false,
+  },
 ];
 
 const RECOMMENDED_APP_TYPES = AGENT_SETUP_TARGETS

@@ -1,7 +1,10 @@
 import {
+  ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
   ChartBarIcon,
   ChevronRightIcon,
   CodeBracketIcon,
+  CommandLineIcon,
   DocumentIcon,
   FolderOpenIcon,
   ListBulletIcon,
@@ -18,7 +21,7 @@ import {
   CoworkFileActivityStatus,
 } from '@shared/cowork/fileActivity';
 import { calculateModelTps, calculateRuntimeTps } from '@shared/cowork/runtimeMetrics';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { i18nService } from '../../services/i18n';
 import type { CoworkSessionStatus, RuntimeCallRecord } from '../../types/cowork';
@@ -36,6 +39,8 @@ import { CoworkActivitySidebarMode } from './activitySidebarConstants';
 import DiffView from './DiffView';
 import { getLiveCodeInitialLineLimit, shouldAutoFollowLiveCodeScroll } from './liveCodePreviewUtils';
 
+const OPENSQUILLA_CONTROL_URL = 'http://127.0.0.1:18791/control/';
+
 interface CoworkActivitySidebarProps {
   snapshot: CoworkActivitySnapshot;
   sessionStatus: CoworkSessionStatus;
@@ -46,6 +51,7 @@ interface CoworkActivitySidebarProps {
   liveFileActivities: CoworkFileActivity[];
   selectedLiveFilePath: string | null;
   runtimeCall?: RuntimeCallRecord | null;
+  showOpenSquillaConsole?: boolean;
   width?: number;
   overlay?: boolean;
   onModeChange: (mode: CoworkActivitySidebarMode) => void;
@@ -654,6 +660,7 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
   liveFileActivities,
   selectedLiveFilePath,
   runtimeCall,
+  showOpenSquillaConsole = false,
   width,
   overlay = false,
   onModeChange,
@@ -682,6 +689,73 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
     }
     return visibleLiveFileActivities[0] ?? null;
   }, [selectedLiveFilePath, visibleLiveFileActivities]);
+  const [consoleProbe, setConsoleProbe] = useState<{
+    loading: boolean;
+    reachable: boolean;
+    frameBlocked?: boolean;
+    error?: string;
+    status?: number;
+  }>({ loading: false, reachable: false });
+  const [gatewayBusyAction, setGatewayBusyAction] = useState<'start' | 'restart' | 'stop' | null>(null);
+  const [gatewayActionMessage, setGatewayActionMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [consoleFrameKey, setConsoleFrameKey] = useState(0);
+
+  const probeOpenSquillaControl = useCallback(async () => {
+    setConsoleProbe((current) => ({ ...current, loading: true }));
+    try {
+      const result = await window.electron.openSquillaControl.probe();
+      setConsoleProbe({
+        loading: false,
+        reachable: result.reachable,
+        frameBlocked: result.frameBlocked,
+        status: result.status,
+        error: result.error,
+      });
+      if (result.reachable && !result.frameBlocked) {
+        setConsoleFrameKey((value) => value + 1);
+      }
+    } catch (error) {
+      setConsoleProbe({
+        loading: false,
+        reachable: false,
+        error: error instanceof Error ? error.message : i18nService.t('coworkActivityOpenSquillaConsoleUnavailable'),
+      });
+    }
+  }, []);
+
+  const runOpenSquillaGatewayAction = useCallback(async (action: 'start' | 'restart' | 'stop') => {
+    setGatewayBusyAction(action);
+    setGatewayActionMessage(null);
+    try {
+      const api = window.electron.openSquillaGateway;
+      const result = action === 'start'
+        ? await api.start()
+        : action === 'restart'
+          ? await api.restart()
+          : await api.stop();
+      if (!result.success) {
+        setGatewayActionMessage({
+          tone: 'error',
+          text: result.error || i18nService.t('coworkActivityOpenSquillaConsoleGatewayFailed'),
+        });
+        return;
+      }
+      setGatewayActionMessage({
+        tone: 'success',
+        text: action === 'stop'
+          ? i18nService.t('coworkActivityOpenSquillaConsoleGatewayStopped')
+          : i18nService.t('coworkActivityOpenSquillaConsoleGatewayReady'),
+      });
+      await probeOpenSquillaControl();
+    } catch (error) {
+      setGatewayActionMessage({
+        tone: 'error',
+        text: error instanceof Error ? error.message : i18nService.t('coworkActivityOpenSquillaConsoleGatewayFailed'),
+      });
+    } finally {
+      setGatewayBusyAction(null);
+    }
+  }, [probeOpenSquillaControl]);
 
   const selectCodeChange = (fileChangeId: string) => {
     onSelectFileChange(fileChangeId);
@@ -691,7 +765,8 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
   const isCodeDiffMode = mode === CoworkActivitySidebarMode.CodeDiff;
   const isLiveCodeMode = mode === CoworkActivitySidebarMode.LiveCode;
   const isRuntimeMonitorMode = mode === CoworkActivitySidebarMode.RuntimeMonitor;
-  const isWideMode = isCodeDiffMode || isLiveCodeMode;
+  const isOpenSquillaConsoleMode = mode === CoworkActivitySidebarMode.OpenSquillaConsole;
+  const isWideMode = isCodeDiffMode || isLiveCodeMode || isOpenSquillaConsoleMode;
   const widthClass = overlay
     ? isWideMode
       ? 'w-[min(760px,calc(100vw-24px))]'
@@ -700,6 +775,11 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
   const sidebarStyle = !overlay && typeof width === 'number'
     ? { width: `${width}px` }
     : undefined;
+
+  useEffect(() => {
+    if (!showOpenSquillaConsole || !isOpenSquillaConsoleMode) return;
+    void probeOpenSquillaControl();
+  }, [isOpenSquillaConsoleMode, probeOpenSquillaControl, showOpenSquillaConsole]);
 
   const renderOverview = () => (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -930,6 +1010,153 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
     </div>
   );
 
+  const renderOpenSquillaConsole = () => (
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <CommandLineIcon className="h-4 w-4 text-primary" />
+            <span>{i18nService.t('coworkActivityOpenSquillaConsoleTitle')}</span>
+          </div>
+          <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
+            {OPENSQUILLA_CONTROL_URL}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void runOpenSquillaGatewayAction('start')}
+            disabled={gatewayBusyAction !== null}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium text-secondary transition-colors hover:bg-surface-raised hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <CommandLineIcon className="h-3.5 w-3.5" />
+            {i18nService.t('coworkActivityOpenSquillaConsoleGatewayStart')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runOpenSquillaGatewayAction('restart')}
+            disabled={gatewayBusyAction !== null}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium text-secondary transition-colors hover:bg-surface-raised hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <ArrowPathIcon className={`h-3.5 w-3.5 ${gatewayBusyAction === 'restart' ? 'animate-spin' : ''}`} />
+            {i18nService.t('coworkActivityOpenSquillaConsoleGatewayRestart')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runOpenSquillaGatewayAction('stop')}
+            disabled={gatewayBusyAction !== null}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium text-secondary transition-colors hover:bg-surface-raised hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <XMarkIcon className="h-3.5 w-3.5" />
+            {i18nService.t('coworkActivityOpenSquillaConsoleGatewayStop')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void probeOpenSquillaControl()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium text-secondary transition-colors hover:bg-surface-raised hover:text-foreground"
+          >
+            <ArrowPathIcon className={`h-3.5 w-3.5 ${consoleProbe.loading ? 'animate-spin' : ''}`} />
+            {i18nService.t('coworkActivityOpenSquillaConsoleRetry')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void window.electron.shell.openExternal(OPENSQUILLA_CONTROL_URL)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium text-secondary transition-colors hover:bg-surface-raised hover:text-foreground"
+          >
+            <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+            {i18nService.t('coworkActivityOpenSquillaConsoleExternal')}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col p-3">
+        {gatewayActionMessage && (
+          <div
+            className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+              gatewayActionMessage.tone === 'success'
+                ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300'
+                : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300'
+            }`}
+          >
+            {gatewayActionMessage.text}
+          </div>
+        )}
+        {consoleProbe.loading ? (
+          <div className="flex h-full min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-surface">
+            <div className="text-center text-sm text-secondary">
+              <ArrowPathIcon className="mx-auto mb-3 h-6 w-6 animate-spin text-primary" />
+              {i18nService.t('coworkActivityOpenSquillaConsoleChecking')}
+            </div>
+          </div>
+        ) : consoleProbe.reachable ? (
+          consoleProbe.frameBlocked ? (
+            <div className="flex h-full min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-surface px-4">
+              <div className="max-w-sm text-center">
+                <CommandLineIcon className="mx-auto mb-3 h-8 w-8 text-primary" />
+                <div className="text-sm font-semibold text-foreground">
+                  {i18nService.t('coworkActivityOpenSquillaConsoleFrameBlocked')}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-secondary">
+                  {i18nService.t('coworkActivityOpenSquillaConsoleFrameBlockedHint')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void window.electron.shell.openExternal(OPENSQUILLA_CONTROL_URL)}
+                  className="mt-4 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                >
+                  {i18nService.t('coworkActivityOpenSquillaConsoleExternal')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <iframe
+              key={consoleFrameKey}
+              src={OPENSQUILLA_CONTROL_URL}
+              title={i18nService.t('coworkActivityOpenSquillaConsoleTitle')}
+              sandbox="allow-forms allow-scripts allow-same-origin allow-popups"
+              onError={() => {
+                setConsoleProbe({
+                  loading: false,
+                  reachable: false,
+                  error: i18nService.t('coworkActivityOpenSquillaConsoleFrameFailed'),
+                });
+              }}
+              className="h-full min-h-[420px] w-full flex-1 rounded-xl border border-border bg-white"
+            />
+          )
+        ) : (
+          <div className="flex h-full min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-surface px-4">
+            <div className="max-w-sm text-center">
+              <CommandLineIcon className="mx-auto mb-3 h-8 w-8 text-muted" />
+              <div className="text-sm font-semibold text-foreground">
+                {i18nService.t('coworkActivityOpenSquillaConsoleUnavailable')}
+              </div>
+              <div className="mt-2 text-xs leading-5 text-secondary">
+                {consoleProbe.error || i18nService.t('coworkActivityOpenSquillaConsoleUnavailableHint')}
+              </div>
+              <div className="mt-4 flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void probeOpenSquillaControl()}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                >
+                  {i18nService.t('coworkActivityOpenSquillaConsoleRetry')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void window.electron.shell.openExternal(OPENSQUILLA_CONTROL_URL)}
+                  className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-secondary hover:bg-surface-raised"
+                >
+                  {i18nService.t('coworkActivityOpenSquillaConsoleExternal')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const renderCodeDiff = () => (
     <div className={`flex min-h-0 flex-1 ${overlay ? 'flex-col' : 'flex-row'}`}>
       <div className={`${overlay ? 'max-h-52 border-b' : 'w-56 shrink-0 border-r'} min-h-0 overflow-y-auto border-border px-3 py-3`}>
@@ -1010,6 +1237,8 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
               <DocumentIcon className="h-4 w-4 text-primary" />
             ) : isRuntimeMonitorMode ? (
               <ChartBarIcon className="h-4 w-4 text-primary" />
+            ) : isOpenSquillaConsoleMode ? (
+              <CommandLineIcon className="h-4 w-4 text-primary" />
             ) : (
               <QueueListIcon className="h-4 w-4 text-primary" />
             )}
@@ -1021,6 +1250,8 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
                     ? 'coworkActivityCodeChanges'
                     : isRuntimeMonitorMode
                       ? 'coworkActivityRuntimeMonitor'
+                      : isOpenSquillaConsoleMode
+                        ? 'coworkActivityOpenSquillaConsole'
                     : 'coworkActivityPanelTitle',
               )}
             </h2>
@@ -1041,7 +1272,7 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
       </div>
 
       <div className="shrink-0 border-b border-border px-3 py-2">
-        <div className="grid grid-cols-4 rounded-xl bg-background p-1">
+        <div className={`${showOpenSquillaConsole ? 'grid-cols-5' : 'grid-cols-4'} grid rounded-xl bg-background p-1`}>
           <ModeButton
             active={mode === CoworkActivitySidebarMode.Overview}
             icon={<QueueListIcon className="h-3.5 w-3.5" />}
@@ -1066,6 +1297,14 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
             label={i18nService.t('coworkActivityCodeChanges')}
             onClick={() => onModeChange(CoworkActivitySidebarMode.CodeDiff)}
           />
+          {showOpenSquillaConsole && (
+            <ModeButton
+              active={mode === CoworkActivitySidebarMode.OpenSquillaConsole}
+              icon={<CommandLineIcon className="h-3.5 w-3.5" />}
+              label={i18nService.t('coworkActivityOpenSquillaConsole')}
+              onClick={() => onModeChange(CoworkActivitySidebarMode.OpenSquillaConsole)}
+            />
+          )}
         </div>
       </div>
 
@@ -1075,6 +1314,8 @@ const CoworkActivitySidebar: React.FC<CoworkActivitySidebarProps> = ({
           ? renderCodeDiff()
           : isRuntimeMonitorMode
             ? renderRuntimeMonitor()
+            : isOpenSquillaConsoleMode
+              ? renderOpenSquillaConsole()
             : renderOverview()}
     </aside>
   );

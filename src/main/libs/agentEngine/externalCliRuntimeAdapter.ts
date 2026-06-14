@@ -12,7 +12,9 @@ import {
   CoworkAgentEngine,
   ExternalAgentConfigSource,
   isClaudeCodePermissionMode,
+  KimiCodePermissionMode,
   OpenCodePermissionMode,
+  OpenSquillaPermissionMode,
   QwenCodePermissionMode,
 } from '../../../shared/cowork/constants';
 import type { CoworkSessionRuntimeSnapshot } from '../../../shared/cowork/runtimeSnapshot';
@@ -47,6 +49,7 @@ import type {
 } from '../externalAgentProviderStore';
 import { normalizeOpenCodeCliEvent } from '../openCodeCliEvent';
 import { buildOpenCodeRuntimeConfigContent } from '../openCodeConfig';
+import { OpenSquillaGatewayRpcClient } from '../openSquillaGatewayRpcClient';
 import { normalizeQwenCodeCliEvent } from '../qwenCodeCliEvent';
 import { buildQwenCodeRuntimeEnv, qwenAuthTypeForCoworkConfig } from '../qwenCodeConfig';
 import type {
@@ -152,7 +155,7 @@ const CodexCliItemType = {
 } as const;
 
 type ActiveCliSession = {
-  child: ChildProcessWithoutNullStreams;
+  child: ChildProcessWithoutNullStreams | null;
   sessionId: string;
   cliSessionId: string | null;
   startedAt: number;
@@ -174,6 +177,17 @@ type ActiveCliSession = {
   configSource: ExternalAgentConfigSource;
   codexGeneratedImageIds: Set<string>;
   completedFromEvent: boolean;
+  openSquillaRouterCardEmitted: boolean;
+  openSquillaRouterLogSummary: {
+    baselineModel?: string | null;
+    routedModel?: string | null;
+    routedTier?: string | null;
+    routingSource?: string | null;
+  };
+  openSquillaRpcClient: OpenSquillaGatewayRpcClient | null;
+  kimiSession: { close?: () => unknown; sessionId?: string } | null;
+  kimiTurn: { interrupt?: () => unknown; approve?: (requestId: string, response: 'approve' | 'reject') => unknown } | null;
+  kimiPendingApprovals: Map<string, string>;
 };
 
 type ExternalCliRuntimeAdapterDeps = {
@@ -230,6 +244,31 @@ const firstString = (...values: unknown[]): string | null => {
     }
   }
   return null;
+};
+
+const numberOrNull = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
+
+const parseJsonObjectSafe = (value: string | null | undefined): Record<string, unknown> | null => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const safeKimiIsLoggedIn = (
+  sdk: typeof import('@moonshot-ai/kimi-agent-sdk'),
+  shareDir?: string,
+): boolean => {
+  try {
+    return sdk.isLoggedIn(shareDir);
+  } catch {
+    return false;
+  }
 };
 
 const chmodBestEffort = (targetPath: string, mode: number): void => {
@@ -346,7 +385,14 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     const active = this.activeSessions.get(sessionId);
     if (active) {
       this.clearSessionTimers(active);
-      active.child.kill('SIGTERM');
+      active.openSquillaRpcClient?.close();
+      void Promise.resolve(active.kimiTurn?.interrupt?.()).catch((error) => {
+        console.warn('[ExternalCliRuntimeAdapter] failed to interrupt Kimi Code turn:', error);
+      });
+      void Promise.resolve(active.kimiSession?.close?.()).catch((error) => {
+        console.warn('[ExternalCliRuntimeAdapter] failed to close Kimi Code session:', error);
+      });
+      active.child?.kill('SIGTERM');
       this.cleanupImagePaths(active.imagePaths);
       this.cleanupCodexHomeDir(active.codexHomeDir);
       this.releaseActiveSession(active);
@@ -361,9 +407,18 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     }
   }
 
-  respondToPermission(_requestId: string, _result: PermissionResult): void {
-    // External CLI engines run in non-interactive mode. Their approval behavior
-    // is controlled by the CLI config and flags.
+  respondToPermission(requestId: string, result: PermissionResult): void {
+    for (const active of this.activeSessions.values()) {
+      const sdkRequestId = active.kimiPendingApprovals.get(requestId);
+      if (!sdkRequestId || !active.kimiTurn?.approve) continue;
+      active.kimiPendingApprovals.delete(requestId);
+      const response = result.behavior === 'allow' ? 'approve' : 'reject';
+      void Promise.resolve(active.kimiTurn.approve(sdkRequestId, response)).catch((error) => {
+        console.warn('[ExternalCliRuntimeAdapter] failed to resolve Kimi Code approval:', error);
+        this.handleError(active.sessionId, error instanceof Error ? error.message : 'Kimi Code approval failed.');
+      });
+      return;
+    }
   }
 
   isSessionActive(sessionId: string): boolean {
@@ -374,6 +429,11 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     if (this.activeSessions.get(active.sessionId) === active) {
       this.activeSessions.delete(active.sessionId);
       this.releaseClaudeRuntimeConfig(active);
+      try {
+        active.kimiSession?.close?.();
+      } catch (error) {
+        console.warn('[ExternalCliRuntimeAdapter] failed to close Kimi Code session:', error);
+      }
     }
   }
 
@@ -450,6 +510,35 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       apiConfigOverride,
       proxyProbeUrl: this.engine === CoworkAgentEngine.Codex ? 'https://api.openai.com' : undefined,
     });
+    if (this.engine === CoworkAgentEngine.KimiCode) {
+      const handledBySdk = await this.tryRunKimiSdkTurn(
+        sessionId,
+        effectivePrompt,
+        cwd,
+        imagePaths,
+        env,
+        currentSession?.claudeSessionId ?? null,
+        options.runtimeSnapshot,
+      );
+      if (handledBySdk) {
+        return;
+      }
+      console.warn('[ExternalCliRuntimeAdapter] Kimi Agent SDK path was unavailable; falling back to CLI agent mode.');
+    }
+    if (this.engine === CoworkAgentEngine.OpenSquilla) {
+      const handledByGateway = await this.tryRunOpenSquillaGatewayTurn(
+        sessionId,
+        effectivePrompt,
+        cwd,
+        imagePaths,
+        env,
+        currentSession?.claudeSessionId ?? null,
+      );
+      if (handledByGateway) {
+        return;
+      }
+      console.warn('[ExternalCliRuntimeAdapter] OpenSquilla gateway path was unavailable; falling back to CLI agent mode.');
+    }
     let localClaudeConfig: LocalClaudeCodeEnvLoadResult | null = null;
     const configSource = this.getConfigSource();
     const selectedProvider = this.getSelectedProviderForLocalCli();
@@ -615,6 +704,12 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       configSource,
       codexGeneratedImageIds: new Set(),
       completedFromEvent: false,
+      openSquillaRouterCardEmitted: false,
+      openSquillaRouterLogSummary: {},
+      openSquillaRpcClient: null,
+      kimiSession: null,
+      kimiTurn: null,
+      kimiPendingApprovals: new Map(),
     };
     active.startupTimer = setTimeout(() => {
       if (active.sawEvent) return;
@@ -697,7 +792,9 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
           if (this.engine === CoworkAgentEngine.Codex && !this.hasVisibleOutput(active)) {
             this.replaceAssistant(active, t('externalCliCodexNoVisibleOutput'), true);
           }
-          this.store.updateSession(sessionId, { status: 'completed', claudeSessionId: active.cliSessionId });
+          this.store.updateSession(sessionId, this.engine === CoworkAgentEngine.OpenSquilla
+            ? { status: 'completed' }
+            : { status: 'completed', claudeSessionId: active.cliSessionId });
           this.applyTurnMemoryUpdates(sessionId);
           this.emit('complete', sessionId, active.cliSessionId);
           resolve();
@@ -739,6 +836,288 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       );
   }
 
+  private async tryRunKimiSdkTurn(
+    sessionId: string,
+    prompt: string,
+    cwd: string,
+    imagePaths: string[],
+    env: Record<string, string | undefined>,
+    previousSessionId: string | null,
+    runtimeSnapshot?: CoworkSessionRuntimeSnapshot | null,
+  ): Promise<boolean> {
+    let sdk: typeof import('@moonshot-ai/kimi-agent-sdk');
+    try {
+      sdk = await import('@moonshot-ai/kimi-agent-sdk');
+    } catch (error) {
+      console.warn('[ExternalCliRuntimeAdapter] Kimi Agent SDK import failed:', error);
+      return false;
+    }
+
+    const kimiCodeShareDir = path.join(os.homedir(), '.kimi-code');
+    const kimiSdkShareDir = path.join(os.homedir(), '.kimi');
+    const shareDir = fs.existsSync(path.join(kimiCodeShareDir, 'config.toml'))
+      || fs.existsSync(path.join(kimiCodeShareDir, 'skills'))
+      ? kimiCodeShareDir
+      : kimiSdkShareDir;
+    const loggedIn = safeKimiIsLoggedIn(sdk, shareDir) || safeKimiIsLoggedIn(sdk, undefined);
+    if (!loggedIn) {
+      this.cleanupImagePaths(imagePaths);
+      this.handleError(sessionId, 'Kimi Code is not logged in. Please open a terminal, run kimi, and complete /login or /setup, then retry in WeSight.');
+      return true;
+    }
+
+    const commandResolution = await resolveCliCommand('kimi', {
+      includeUserShellPath: true,
+      commandProbeTimeoutMs: 4_000,
+    });
+    if (!commandResolution.found) return false;
+
+    const selectedProvider = this.getSelectedProviderForLocalCli();
+    const selectedModel = runtimeSnapshot?.modelId
+      ?? selectedProvider?.summary.model
+      ?? null;
+    const permissionMode = this.store.getConfig().kimiCodePermissionMode ?? KimiCodePermissionMode.Auto;
+    const sdkEnv = Object.fromEntries(
+      Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+    sdkEnv.KIMI_SHARE_DIR = shareDir;
+    const promptWithFiles = imagePaths.length > 0
+      ? `${prompt}\n\nAttached local files:\n${imagePaths.join('\n')}`
+      : prompt;
+
+    const kimiSession = sdk.createSession({
+      workDir: cwd,
+      sessionId: previousSessionId ?? undefined,
+      model: selectedModel || undefined,
+      yoloMode: permissionMode === KimiCodePermissionMode.Yolo || permissionMode === KimiCodePermissionMode.Auto,
+      executable: commandResolution.path ?? 'kimi',
+      env: sdkEnv,
+      clientInfo: {
+        name: 'WeSight',
+        version: 'desktop',
+      },
+    });
+    if (permissionMode === KimiCodePermissionMode.Plan && typeof kimiSession.setPlanMode === 'function') {
+      try {
+        await kimiSession.setPlanMode(true);
+      } catch (error) {
+        console.warn('[ExternalCliRuntimeAdapter] failed to enable Kimi Code plan mode:', error);
+      }
+    }
+
+    const currentSession = this.store.getSession(sessionId);
+    const active: ActiveCliSession = {
+      child: null,
+      sessionId,
+      cliSessionId: previousSessionId ?? null,
+      startedAt: Date.now(),
+      initialMessageCount: currentSession?.messages.length ?? 0,
+      assistantMessageId: null,
+      assistantContent: '',
+      assistantOutputStartedLogged: false,
+      stderrTail: '',
+      cliErrorMessage: null,
+      sawEvent: false,
+      sawClaudeVisibleOutput: false,
+      startupTimer: null,
+      noContentNoticeTimer: null,
+      noContentTimeoutTimer: null,
+      imagePaths,
+      codexHomeDir: null,
+      claudeRuntimeConfigLease: null,
+      localClaudeConfig: null,
+      configSource: this.getConfigSource(),
+      codexGeneratedImageIds: new Set(),
+      completedFromEvent: false,
+      openSquillaRouterCardEmitted: false,
+      openSquillaRouterLogSummary: {},
+      openSquillaRpcClient: null,
+      kimiSession,
+      kimiTurn: null,
+      kimiPendingApprovals: new Map(),
+    };
+    this.activeSessions.set(sessionId, active);
+
+    try {
+      const turn = kimiSession.prompt(promptWithFiles);
+      active.kimiTurn = turn;
+      for await (const event of turn) {
+        if (this.activeSessions.get(sessionId) !== active) break;
+        active.sawEvent = true;
+        this.handleKimiSdkEvent(active, event);
+      }
+      this.clearSessionTimers(active);
+      this.finalizeAssistant(active);
+      this.cleanupImagePaths(active.imagePaths);
+      this.releaseActiveSession(active);
+      if (this.stoppedSessions.has(sessionId)) {
+        this.store.updateSession(sessionId, { status: 'idle' });
+        this.emit('sessionStopped', sessionId);
+        return true;
+      }
+      const runtimeSessionId = firstString(kimiSession.sessionId) ?? previousSessionId;
+      this.store.updateSession(sessionId, { status: 'completed', claudeSessionId: runtimeSessionId ?? null });
+      this.applyTurnMemoryUpdates(sessionId);
+      this.emit('complete', sessionId, runtimeSessionId ?? null);
+      return true;
+    } catch (error) {
+      this.clearSessionTimers(active);
+      this.finalizeAssistant(active);
+      this.cleanupImagePaths(active.imagePaths);
+      this.releaseActiveSession(active);
+      this.handleError(sessionId, this.formatKimiSdkError(error));
+      return true;
+    }
+  }
+
+  private handleKimiSdkEvent(active: ActiveCliSession, event: unknown): void {
+    if (!isRecord(event)) return;
+    const eventType = firstString(event.type);
+    const payload = isRecord(event.payload) ? event.payload : {};
+    if (eventType === 'ContentPart') {
+      this.handleKimiContentPart(active, payload);
+      return;
+    }
+    if (eventType === 'ToolCall') {
+      this.handleKimiToolCall(active, payload);
+      return;
+    }
+    if (eventType === 'ToolResult') {
+      this.handleKimiToolResult(active, payload);
+      return;
+    }
+    if (eventType === 'ApprovalRequest') {
+      this.handleKimiApprovalRequest(active, payload);
+      return;
+    }
+    if (eventType === 'StatusUpdate') {
+      this.handleKimiStatusUpdate(active, payload);
+      return;
+    }
+    if (eventType === 'TurnEnd') {
+      active.completedFromEvent = true;
+    }
+  }
+
+  private handleKimiContentPart(active: ActiveCliSession, payload: Record<string, unknown>): void {
+    const contentType = firstString(payload.type);
+    if (contentType === 'text') {
+      const text = firstString(payload.text);
+      if (text) this.appendAssistant(active, text);
+      return;
+    }
+    if (contentType === 'think') {
+      const think = firstString(payload.think);
+      if (!think) return;
+      this.addToolMessage(active.sessionId, {
+        type: 'tool_result',
+        content: think,
+        metadata: {
+          toolName: 'Kimi Think',
+          isThinking: true,
+          isStreaming: false,
+        },
+      });
+    }
+  }
+
+  private handleKimiToolCall(active: ActiveCliSession, payload: Record<string, unknown>): void {
+    const fn = isRecord(payload.function) ? payload.function : {};
+    const toolName = firstString(fn.name) ?? 'Kimi Tool';
+    const rawArgs = firstString(fn.arguments);
+    const toolInput = parseJsonObjectSafe(rawArgs) ?? (rawArgs ? { input: rawArgs } : {});
+    this.addToolMessage(active.sessionId, {
+      type: 'tool_use',
+      content: toolName,
+      metadata: {
+        toolName,
+        toolInput,
+        toolUseId: firstString(payload.id),
+      },
+    });
+  }
+
+  private handleKimiToolResult(active: ActiveCliSession, payload: Record<string, unknown>): void {
+    const returnValue = isRecord(payload.return_value) ? payload.return_value : {};
+    const output = this.extractKimiContentText(returnValue.output);
+    const display = Array.isArray(returnValue.display) ? returnValue.display : [];
+    const toolName = this.getKimiDisplayToolName(display) ?? 'Kimi Tool';
+    this.addToolMessage(active.sessionId, {
+      type: 'tool_result',
+      content: output || stringifyPayload(returnValue),
+      metadata: {
+        toolName,
+        toolUseId: firstString(payload.tool_call_id),
+        isError: returnValue.is_error === true,
+        toolResultDisplay: display,
+      },
+    });
+  }
+
+  private handleKimiApprovalRequest(active: ActiveCliSession, payload: Record<string, unknown>): void {
+    const sdkRequestId = firstString(payload.id);
+    if (!sdkRequestId) return;
+    const requestId = `kimi-${active.sessionId}-${sdkRequestId}`;
+    active.kimiPendingApprovals.set(requestId, sdkRequestId);
+    this.emit('permissionRequest', active.sessionId, {
+      requestId,
+      toolName: firstString(payload.action, payload.sender) ?? 'Kimi Approval',
+      toolUseId: firstString(payload.tool_call_id),
+      toolInput: {
+        description: firstString(payload.description) ?? '',
+        action: firstString(payload.action) ?? '',
+        sender: firstString(payload.sender) ?? '',
+        display: Array.isArray(payload.display) ? payload.display : [],
+      },
+    });
+  }
+
+  private handleKimiStatusUpdate(active: ActiveCliSession, payload: Record<string, unknown>): void {
+    const tokenUsage = isRecord(payload.token_usage) ? payload.token_usage : {};
+    this.emit('runtimeMetric', active.sessionId, {
+      type: 'usage',
+      inputTokens: numberOrNull(tokenUsage.input_other),
+      outputTokens: numberOrNull(tokenUsage.output),
+      cacheReadTokens: numberOrNull(tokenUsage.input_cache_read),
+      cacheWriteTokens: numberOrNull(tokenUsage.input_cache_creation),
+      contextTokens: numberOrNull(payload.context_usage),
+      tokensEstimated: false,
+    });
+  }
+
+  private extractKimiContentText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (!Array.isArray(value)) return '';
+    return value
+      .map((item) => {
+        if (!isRecord(item)) return '';
+        if (item.type === 'text') return firstString(item.text) ?? '';
+        if (item.type === 'think') return firstString(item.think) ?? '';
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private getKimiDisplayToolName(display: unknown[]): string | null {
+    const first = display.find((item) => isRecord(item)) as Record<string, unknown> | undefined;
+    if (!first) return null;
+    const type = firstString(first.type);
+    if (!type) return null;
+    if (type === 'diff') return 'Kimi Edit';
+    if (type === 'todo') return 'TodoWrite';
+    if (type === 'shell') return 'Bash';
+    return `Kimi ${type}`;
+  }
+
+  private formatKimiSdkError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/login|auth|credential|unauthorized/i.test(message)) {
+      return 'Kimi Code is not logged in or its login has expired. Please open a terminal, run kimi, and complete /login or /setup, then retry in WeSight.';
+    }
+    return `Kimi Code returned an error.\n\n${message}`;
+  }
+
   private completeCodexSessionFromEvent(active: ActiveCliSession): void {
     if (active.completedFromEvent) return;
     if (this.store.getSession(active.sessionId)?.status === 'error') return;
@@ -753,7 +1132,202 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     this.applyTurnMemoryUpdates(active.sessionId);
     this.releaseActiveSession(active);
     this.emit('complete', active.sessionId, active.cliSessionId);
-    active.child.kill('SIGTERM');
+    active.child?.kill('SIGTERM');
+  }
+
+  private async tryRunOpenSquillaGatewayTurn(
+    sessionId: string,
+    prompt: string,
+    cwd: string,
+    imagePaths: string[],
+    env: NodeJS.ProcessEnv,
+    previousSessionKey: string | null,
+  ): Promise<boolean> {
+    const commandResolution = await resolveCliCommand('opensquilla', {
+      commandProbeTimeoutMs: 5_000,
+      includeUserShellPath: true,
+    });
+    if (!commandResolution.found || !commandResolution.path) {
+      return false;
+    }
+    const gatewayReady = await this.ensureOpenSquillaGatewayReady(commandResolution.path, cwd, env);
+    if (!gatewayReady) {
+      return false;
+    }
+
+    const client = new OpenSquillaGatewayRpcClient();
+    const sessionKey = this.resolveOpenSquillaWebchatSessionKey(sessionId, previousSessionKey);
+    const active: ActiveCliSession = {
+      child: null,
+      sessionId,
+      cliSessionId: sessionKey,
+      startedAt: Date.now(),
+      initialMessageCount: this.store.getSession(sessionId)?.messages.length ?? 0,
+      assistantMessageId: null,
+      assistantContent: '',
+      assistantOutputStartedLogged: false,
+      stderrTail: '',
+      cliErrorMessage: null,
+      sawEvent: false,
+      sawClaudeVisibleOutput: false,
+      startupTimer: null,
+      noContentNoticeTimer: null,
+      noContentTimeoutTimer: null,
+      imagePaths,
+      codexHomeDir: null,
+      claudeRuntimeConfigLease: null,
+      localClaudeConfig: null,
+      configSource: this.getConfigSource(),
+      codexGeneratedImageIds: new Set(),
+      completedFromEvent: false,
+      openSquillaRouterCardEmitted: false,
+      openSquillaRouterLogSummary: {},
+      openSquillaRpcClient: client,
+      kimiSession: null,
+      kimiTurn: null,
+      kimiPendingApprovals: new Map(),
+    };
+    this.activeSessions.set(sessionId, active);
+
+    let terminalResolve: (() => void) | null = null;
+    const terminalPromise = new Promise<void>((resolve) => {
+      terminalResolve = resolve;
+    });
+    let terminalTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (status: 'completed' | 'error' | 'stopped', error?: string) => {
+      if (active.completedFromEvent) return;
+      active.completedFromEvent = true;
+      if (terminalTimer) {
+        clearTimeout(terminalTimer);
+        terminalTimer = null;
+      }
+      this.clearSessionTimers(active);
+      this.finalizeAssistant(active);
+      this.cleanupImagePaths(active.imagePaths);
+      active.openSquillaRpcClient?.close();
+      this.releaseActiveSession(active);
+      if (status === 'completed') {
+        this.store.updateSession(sessionId, { status: 'completed', claudeSessionId: sessionKey });
+        this.applyTurnMemoryUpdates(sessionId);
+        this.emit('complete', sessionId, sessionKey);
+      } else if (status === 'stopped') {
+        this.store.updateSession(sessionId, { status: 'idle', claudeSessionId: sessionKey });
+        this.emit('sessionStopped', sessionId);
+      } else {
+        this.handleError(sessionId, error || 'OpenSquilla returned an error.');
+      }
+      terminalResolve?.();
+    };
+
+    terminalTimer = setTimeout(() => {
+      if (this.activeSessions.get(sessionId) !== active) return;
+      finish('error', 'OpenSquilla gateway did not emit a terminal event in time.');
+    }, 10 * 60 * 1000);
+
+    client.on('*', (raw) => {
+      if (this.activeSessions.get(sessionId) !== active) return;
+      if (!isRecord(raw)) return;
+      const eventName = firstString(raw.event) ?? '';
+      const payload = isRecord(raw.payload) ? raw.payload : {};
+      active.sawEvent = true;
+      this.handleOpenSquillaEvent(active, {
+        type: eventName,
+        event: eventName,
+        payload,
+      });
+      if (eventName.endsWith('.done') || eventName === 'task.succeeded') {
+        finish('completed');
+      } else if (eventName.endsWith('.error') || eventName === 'task.failed' || eventName === 'task.timeout') {
+        finish('error', this.extractOpenSquillaError(payload) ?? 'OpenSquilla returned an error.');
+      }
+    });
+
+    try {
+      await client.connect();
+      await client.call('sessions.messages.subscribe', { key: sessionKey });
+      const promptWithFiles = imagePaths.length > 0
+        ? `${prompt}\n\nAttached local files:\n${imagePaths.map((imagePath) => imagePath).join('\n')}`
+        : prompt;
+      const permissionMode = this.store.getConfig().opensquillaPermissionMode ?? OpenSquillaPermissionMode.Bypass;
+      const elevated = permissionMode === OpenSquillaPermissionMode.Full
+        ? 'full'
+        : permissionMode === OpenSquillaPermissionMode.Bypass
+          ? 'bypass'
+          : permissionMode === OpenSquillaPermissionMode.On
+            ? 'on'
+            : null;
+      const params: Record<string, unknown> = {
+        sessionKey,
+        message: promptWithFiles,
+      };
+      if (elevated) {
+        params._source = { elevated };
+      }
+      await client.call('chat.send', params);
+      await terminalPromise;
+      return true;
+    } catch (error) {
+      if (terminalTimer) {
+        clearTimeout(terminalTimer);
+        terminalTimer = null;
+      }
+      if (this.activeSessions.get(sessionId) === active) {
+        this.cleanupImagePaths(active.imagePaths);
+        active.openSquillaRpcClient?.close();
+        this.releaseActiveSession(active);
+      }
+      console.warn('[ExternalCliRuntimeAdapter] OpenSquilla gateway turn failed:', error);
+      return false;
+    }
+  }
+
+  private async ensureOpenSquillaGatewayReady(
+    command: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<boolean> {
+    if (await this.isOpenSquillaGatewayHealthy()) {
+      return true;
+    }
+    const result = spawnSync(command, ['gateway', 'start', '--json', '--timeout', '20'], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      timeout: 25_000,
+      windowsHide: process.platform === 'win32',
+    });
+    if (result.error) {
+      console.warn('[ExternalCliRuntimeAdapter] failed to start OpenSquilla gateway:', result.error);
+      return false;
+    }
+    if (result.status !== 0) {
+      console.warn('[ExternalCliRuntimeAdapter] OpenSquilla gateway start exited before becoming ready.', {
+        status: result.status,
+        stderr: (result.stderr || '').slice(-1000),
+      });
+      return false;
+    }
+    return this.isOpenSquillaGatewayHealthy();
+  }
+
+  private async isOpenSquillaGatewayHealthy(): Promise<boolean> {
+    try {
+      const response = await fetch('http://127.0.0.1:18791/health', {
+        signal: AbortSignal.timeout(2_000),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private resolveOpenSquillaWebchatSessionKey(sessionId: string, previousSessionKey: string | null): string {
+    if (previousSessionKey?.startsWith('agent:main:webchat:')) {
+      return previousSessionKey;
+    }
+    const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || randomUUID().replace(/-/g, '');
+    return `agent:main:webchat:wesight-${safeSessionId}`;
   }
 
   private buildCommandArgs(
@@ -863,6 +1437,34 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       return args;
     }
 
+    if (this.engine === CoworkAgentEngine.OpenSquilla) {
+      const promptWithFiles = imagePaths.length > 0
+        ? `${prompt}\n\nAttached local files:\n${imagePaths.map((imagePath) => imagePath).join('\n')}`
+        : prompt;
+      return [
+        'agent',
+        '--json',
+        '--workspace',
+        cwd,
+        '--permissions',
+        this.store.getConfig().opensquillaPermissionMode ?? OpenSquillaPermissionMode.Bypass,
+        '-m',
+        promptWithFiles,
+      ];
+    }
+
+    if (this.engine === CoworkAgentEngine.KimiCode) {
+      const promptWithFiles = imagePaths.length > 0
+        ? `${prompt}\n\nAttached local files:\n${imagePaths.map((imagePath) => imagePath).join('\n')}`
+        : prompt;
+      return [
+        '-p',
+        promptWithFiles,
+        '--output-format',
+        'stream-json',
+      ];
+    }
+
     const canResumeCodexSession = this.getConfigSource() !== ExternalAgentConfigSource.WesightModel;
     if (cliSessionId && canResumeCodexSession) {
       const resumeArgs = [
@@ -903,7 +1505,11 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
   }
 
   private shouldInjectCoworkModelConfig(): boolean {
-    if (this.engine === CoworkAgentEngine.GrokBuild) {
+    if (
+      this.engine === CoworkAgentEngine.GrokBuild
+      || this.engine === CoworkAgentEngine.OpenSquilla
+      || this.engine === CoworkAgentEngine.KimiCode
+    ) {
       return false;
     }
     return this.getConfigSource() !== ExternalAgentConfigSource.LocalCli;
@@ -926,6 +1532,12 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     if (this.engine === CoworkAgentEngine.GrokBuild) {
       return ExternalAgentConfigSource.LocalCli;
     }
+    if (this.engine === CoworkAgentEngine.OpenSquilla) {
+      return config.opensquillaConfigSource;
+    }
+    if (this.engine === CoworkAgentEngine.KimiCode) {
+      return config.kimiCodeConfigSource;
+    }
     return ExternalAgentConfigSource.WesightModel;
   }
 
@@ -947,6 +1559,12 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     }
     if (this.engine === CoworkAgentEngine.GrokBuild) {
       return this.getCurrentProvider?.('grok') ?? null;
+    }
+    if (this.engine === CoworkAgentEngine.OpenSquilla) {
+      return this.getCurrentProvider?.('opensquilla') ?? null;
+    }
+    if (this.engine === CoworkAgentEngine.KimiCode) {
+      return this.getCurrentProvider?.('kimi') ?? null;
     }
     return null;
   }
@@ -977,6 +1595,8 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     if (this.engine === CoworkAgentEngine.Codex) return 'codex';
     if (this.engine === CoworkAgentEngine.OpenCode) return 'opencode';
     if (this.engine === CoworkAgentEngine.GrokBuild) return 'grok';
+    if (this.engine === CoworkAgentEngine.OpenSquilla) return 'opensquilla';
+    if (this.engine === CoworkAgentEngine.KimiCode) return 'kimi';
     return 'qwen';
   }
 
@@ -1495,7 +2115,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
         seconds: Math.round(CLAUDE_NO_CONTENT_TIMEOUT_MS / 1000),
         provider: this.describeLocalClaudeConfig(active.localClaudeConfig, active.configSource),
       }));
-      active.child.kill('SIGTERM');
+      active.child?.kill('SIGTERM');
     }, CLAUDE_NO_CONTENT_TIMEOUT_MS);
   }
 
@@ -1596,15 +2216,78 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
         this.handleGrokBuildEvent(active, event);
       } else if (this.engine === CoworkAgentEngine.QwenCode) {
         this.handleQwenCodeEvent(active, event);
+      } else if (this.engine === CoworkAgentEngine.OpenSquilla) {
+        this.handleOpenSquillaEvent(active, event);
+      } else if (this.engine === CoworkAgentEngine.KimiCode) {
+        this.handleKimiSdkEvent(active, event);
       } else {
         this.handleClaudeCliEvent(active, event);
       }
     } catch {
+      if (this.engine === CoworkAgentEngine.OpenSquilla && this.isOpenSquillaPlainLogLine(line)) {
+        this.captureOpenSquillaRouterLogLine(active, line);
+        return;
+      }
       if (this.engine === CoworkAgentEngine.ClaudeCode) {
         this.markClaudeVisibleOutput(active);
       }
       this.appendAssistant(active, line);
     }
+  }
+
+  private isOpenSquillaPlainLogLine(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\[(debug|info|warning|error|critical)\s*\]/i.test(trimmed)
+      || /^Building prefix dict\b/i.test(trimmed)
+      || /^Loading model\b/i.test(trimmed)
+      || /^Loading model cost\b/i.test(trimmed)
+      || /^Prefix dict has been built successfully\b/i.test(trimmed)
+      || /^sandbox\./i.test(trimmed)
+      || /^OpenSquilla router fallback active\b/i.test(trimmed)
+      || /^Visual C\+\+ Redistributable\b/i.test(trimmed)
+      || /^If automatic installation fails\b/i.test(trimmed)
+      || /^Reason: tried:/i.test(trimmed)
+      || /^Referenced from:/i.test(trimmed)
+      || /^Error: failed to initialize V4 Phase 3 router:/i.test(trimmed);
+  }
+
+  private captureOpenSquillaRouterLogLine(active: ActiveCliSession, line: string): void {
+    if (!/router|provider_ready|resolved|pipeline_model|routed_model|applied_model/i.test(line)) {
+      return;
+    }
+    const pairs = new Map<string, string>();
+    for (const match of line.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|'[^']*'|[^\s]+)/g)) {
+      const key = match[1];
+      const rawValue = match[2] ?? '';
+      const value = rawValue.replace(/^['"]|['"]$/g, '').trim();
+      if (key && value && value !== 'None' && value !== 'null') {
+        pairs.set(key, value);
+      }
+    }
+
+    const baselineModel = firstString(
+      pairs.get('pipeline_model'),
+      pairs.get('selector_model'),
+      pairs.get('baseline_model'),
+      pairs.get('requested_model'),
+    );
+    const routedModel = firstString(
+      pairs.get('resolved'),
+      pairs.get('routed_model'),
+      pairs.get('applied_model'),
+      pairs.get('model'),
+    );
+    const routedTier = firstString(pairs.get('tier'), pairs.get('routed_tier'));
+    const routingSource = firstString(pairs.get('source'), pairs.get('routing_source'), pairs.get('fallback_reason'));
+
+    active.openSquillaRouterLogSummary = {
+      ...active.openSquillaRouterLogSummary,
+      ...(baselineModel ? { baselineModel } : {}),
+      ...(routedModel ? { routedModel } : {}),
+      ...(routedTier ? { routedTier } : {}),
+      ...(routingSource ? { routingSource } : {}),
+    };
   }
 
   private emitUsageMetricFromEvent(active: ActiveCliSession, event: unknown): void {
@@ -1675,7 +2358,7 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
       active.completedFromEvent = true;
       this.clearSessionTimers(active);
       this.handleError(active.sessionId, firstString(event.message, event.error) ?? 'Codex turn failed.');
-      active.child.kill('SIGTERM');
+      active.child?.kill('SIGTERM');
       return;
     }
     if (type === CodexCliEventType.TurnCompleted) {
@@ -1991,6 +2674,324 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     if (text) {
       this.appendAssistant(active, text);
     }
+  }
+
+  private handleOpenSquillaEvent(active: ActiveCliSession, event: unknown): void {
+    if (!isRecord(event)) return;
+    this.emitUsageMetricFromEvent(active, event);
+    this.maybeAddOpenSquillaRouterCard(active, event);
+    const type = String(event.type ?? event.event ?? event.kind ?? event.status ?? '').toLowerCase();
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const item = isRecord(event.item) ? event.item : {};
+    const cliSessionId = firstString(
+      event.session_key,
+      event.sessionKey,
+      event.session_id,
+      event.sessionId,
+      payload.session_key,
+      payload.sessionKey,
+      item.session_key,
+      item.sessionKey,
+    );
+    if (cliSessionId) {
+      active.cliSessionId = cliSessionId;
+    }
+
+    const errors = Array.isArray(event.errors) ? event.errors : [];
+    const hasExplicitErrorStatus = type === 'error'
+      || type === 'failed'
+      || type === 'failure'
+      || type.includes('.error')
+      || type.endsWith('_error');
+    if (hasExplicitErrorStatus || Boolean(event.error) || errors.length > 0) {
+      const message = this.extractOpenSquillaError(event) ?? 'OpenSquilla returned an error.';
+      active.cliErrorMessage = message;
+      active.stderrTail = this.appendStderrTail(active.stderrTail, `${message}\n`);
+      this.handleError(active.sessionId, message);
+      return;
+    }
+
+    if (this.isOpenSquillaToolEvent(type, event, payload, item)) {
+      this.handleOpenSquillaToolEvent(active, type, event, payload, item);
+      return;
+    }
+
+    const artifact = isRecord(event.artifact)
+      ? event.artifact
+      : isRecord(payload.artifact)
+        ? payload.artifact
+        : null;
+    if (artifact) {
+      const text = firstString(artifact.path, artifact.name, artifact.title, artifact.url) ?? stringifyPayload(artifact);
+      this.addToolMessage(active.sessionId, {
+        type: 'tool_result',
+        content: text,
+        metadata: {
+          toolName: 'Artifact',
+          toolResult: text,
+        },
+      });
+      return;
+    }
+
+    if (type.includes('step') || type.includes('status') || type.includes('routing')) {
+      const label = firstString(event.message, event.status, event.detail, payload.message);
+      if (label) {
+        this.emit('runtimeMetric', active.sessionId, {
+          type: 'step',
+          label,
+        });
+      }
+    }
+
+    const text = this.extractOpenSquillaText(event);
+    if (text) {
+      if (type === 'ok'
+        || type.includes('done')
+        || type.includes('final')
+        || type === 'completed'
+        || event.status === 'completed'
+        || event.status === 'ok') {
+        this.replaceAssistant(active, text, true);
+      } else {
+        this.appendAssistant(active, text);
+      }
+    }
+  }
+
+  private maybeAddOpenSquillaRouterCard(active: ActiveCliSession, event: Record<string, unknown>): void {
+    if (active.openSquillaRouterCardEmitted) return;
+    const usage = this.findOpenSquillaRecord(event, 'usage');
+    const routing = this.findOpenSquillaRecord(event, 'routing');
+    if (!usage && !routing) return;
+
+    const baselineModel = firstString(
+      active.openSquillaRouterLogSummary.baselineModel,
+      routing?.baseline_model,
+      routing?.baselineModel,
+      routing?.requested_model,
+      routing?.requestedModel,
+      usage?.baseline_model,
+      usage?.baselineModel,
+      usage?.requested_model,
+      usage?.requestedModel,
+    );
+    const routedModel = firstString(
+      active.openSquillaRouterLogSummary.routedModel,
+      routing?.routed_model,
+      routing?.routedModel,
+      routing?.applied_model,
+      routing?.appliedModel,
+      usage?.model,
+      event.model,
+    );
+    const model = routedModel ?? baselineModel;
+    if (!model && !usage) return;
+
+    const toolUseId = `opensquilla-router-${randomUUID()}`;
+    const inputTokens = firstNumber(usage?.input_tokens, usage?.prompt_tokens, usage?.inputTokens, usage?.promptTokens);
+    const outputTokens = firstNumber(usage?.output_tokens, usage?.completion_tokens, usage?.outputTokens, usage?.completionTokens);
+    const totalTokens = firstNumber(usage?.total_tokens, usage?.totalTokens);
+    const cachedTokens = firstNumber(
+      usage?.cached_tokens,
+      usage?.cache_read_input_tokens,
+      usage?.cacheReadInputTokens,
+      usage?.cache_read_tokens,
+      usage?.cacheReadTokens,
+    );
+    const costUsd = firstNumber(usage?.cost_usd, usage?.costUsd, usage?.billed_cost, usage?.billedCost);
+    const requestCount = firstNumber(usage?.request_count, usage?.requestCount);
+    const routerSummary = {
+      baselineModel,
+      routedModel: model,
+      routedTier: firstString(routing?.routed_tier, routing?.routedTier, routing?.tier, active.openSquillaRouterLogSummary.routedTier),
+      routingSource: firstString(routing?.routing_source, routing?.routingSource, routing?.source, active.openSquillaRouterLogSummary.routingSource),
+      routingConfidence: firstNumber(routing?.routing_confidence, routing?.routingConfidence, routing?.confidence),
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      cachedTokens,
+      reasoningTokens: firstNumber(usage?.reasoning_tokens, usage?.reasoningTokens),
+      costUsd,
+      requestCount,
+      cacheHitRate: totalTokens && cachedTokens !== null ? cachedTokens / Math.max(totalTokens, 1) : null,
+    };
+
+    active.openSquillaRouterCardEmitted = true;
+    this.addToolMessage(active.sessionId, {
+      type: 'tool_use',
+      content: 'OpenSquilla AI Model Router',
+      metadata: {
+        toolName: 'OpenSquillaRouter',
+        toolUseId,
+        openSquillaRouter: routerSummary,
+      },
+    });
+    this.addToolMessage(active.sessionId, {
+      type: 'tool_result',
+      content: model ? `OpenSquilla routed to ${model}` : 'OpenSquilla router usage captured',
+      metadata: {
+        toolName: 'OpenSquillaRouter',
+        toolUseId,
+        toolResult: JSON.stringify(routerSummary),
+        openSquillaRouter: routerSummary,
+      },
+    });
+  }
+
+  private findOpenSquillaRecord(event: Record<string, unknown>, key: string): Record<string, unknown> | null {
+    const direct = event[key];
+    if (isRecord(direct)) return direct;
+    const payload = isRecord(event.payload) ? event.payload[key] : null;
+    if (isRecord(payload)) return payload;
+    const result = isRecord(event.result) ? event.result[key] : null;
+    if (isRecord(result)) return result;
+    const response = isRecord(event.response) ? event.response[key] : null;
+    if (isRecord(response)) return response;
+    return null;
+  }
+
+  private isOpenSquillaToolEvent(
+    type: string,
+    event: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    item: Record<string, unknown>,
+  ): boolean {
+    return type.includes('tool')
+      || type.includes('exec')
+      || type.includes('command')
+      || type.includes('shell')
+      || isRecord(event.tool)
+      || isRecord(event.command)
+      || isRecord(payload.tool)
+      || isRecord(item.tool);
+  }
+
+  private handleOpenSquillaToolEvent(
+    active: ActiveCliSession,
+    type: string,
+    event: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    item: Record<string, unknown>,
+  ): void {
+    const commandRecord = isRecord(event.command)
+      ? event.command
+      : isRecord(payload.command)
+        ? payload.command
+        : isRecord(item.command)
+          ? item.command
+          : {};
+    const toolRecord = isRecord(event.tool)
+      ? event.tool
+      : isRecord(payload.tool)
+        ? payload.tool
+        : isRecord(item.tool)
+          ? item.tool
+          : {};
+    const toolName = firstString(
+      event.tool_name,
+      event.toolName,
+      event.name,
+      payload.tool_name,
+      payload.toolName,
+      payload.name,
+      item.tool_name,
+      item.toolName,
+      item.name,
+      toolRecord.name,
+      commandRecord.name,
+      commandRecord.command,
+    ) ?? 'OpenSquilla';
+    const output = firstString(
+      event.output,
+      event.result,
+      event.text,
+      payload.output,
+      payload.result,
+      payload.text,
+      item.output,
+      item.result,
+      item.text,
+      toolRecord.output,
+      toolRecord.result,
+      commandRecord.output,
+      commandRecord.result,
+    );
+    const completed = type.includes('finish')
+      || type.includes('complete')
+      || type.includes('result')
+      || type.includes('done')
+      || type.includes('failed')
+      || type.includes('error');
+    if (!completed) {
+      this.addToolMessage(active.sessionId, {
+        type: 'tool_use',
+        content: `Using tool: ${toolName}`,
+        metadata: {
+          toolName,
+          toolInput: isRecord(event.input)
+            ? event.input
+            : isRecord(payload.input)
+              ? payload.input
+              : isRecord(item.input)
+                ? item.input
+                : { ...toolRecord, ...commandRecord },
+        },
+      });
+      return;
+    }
+    this.addToolMessage(active.sessionId, {
+      type: 'tool_result',
+      content: output ?? stringifyPayload(event),
+      metadata: {
+        toolName,
+        toolResult: output ?? stringifyPayload(event),
+        isError: type.includes('failed') || type.includes('error') || event.status === 'failed',
+      },
+    });
+  }
+
+  private extractOpenSquillaError(event: Record<string, unknown>): string | null {
+    const error = event.error;
+    if (typeof error === 'string' && error.trim()) return error;
+    if (isRecord(error)) {
+      return firstString(error.message, error.error, error.detail);
+    }
+    if (Array.isArray(event.errors)) {
+      const text = event.errors
+        .map((item) => (typeof item === 'string' ? item : isRecord(item) ? firstString(item.message, item.error, item.detail) : null))
+        .filter((item): item is string => Boolean(item))
+        .join('\n');
+      if (text.trim()) return text;
+    }
+    return firstString(event.message, event.detail);
+  }
+
+  private extractOpenSquillaText(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value.trim() ? value : null;
+    }
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((item) => this.extractOpenSquillaText(item))
+        .filter((item): item is string => Boolean(item));
+      return parts.length > 0 ? parts.join('') : null;
+    }
+    if (!isRecord(value)) return null;
+    const direct = firstString(
+      value.text,
+      value.delta,
+      value.content,
+      value.message,
+      value.output,
+      value.response,
+      value.result,
+      value.final,
+    );
+    if (direct) return direct;
+    return this.extractOpenSquillaText(value.payload)
+      ?? this.extractOpenSquillaText(value.item)
+      ?? this.extractOpenSquillaText(value.data);
   }
 
   private isGrokBuildToolEvent(
@@ -2502,6 +3503,8 @@ export class ExternalCliRuntimeAdapter extends EventEmitter implements CoworkRun
     if (this.engine === CoworkAgentEngine.Codex) return 'Codex CLI';
     if (this.engine === CoworkAgentEngine.OpenCode) return 'OpenCode CLI';
     if (this.engine === CoworkAgentEngine.GrokBuild) return 'Grok Build CLI';
+    if (this.engine === CoworkAgentEngine.OpenSquilla) return 'OpenSquilla CLI';
+    if (this.engine === CoworkAgentEngine.KimiCode) return 'Kimi Code CLI';
     return 'Qwen Code CLI';
   }
 }

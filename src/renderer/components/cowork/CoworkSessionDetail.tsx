@@ -795,6 +795,180 @@ const TodoWriteInputView: React.FC<{ items: ParsedTodoItem[] }> = ({ items }) =>
   );
 };
 
+type OpenSquillaRouterSummary = {
+  baselineModel?: string | null;
+  routedModel?: string | null;
+  routedTier?: string | null;
+  routingSource?: string | null;
+  routingConfidence?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  cachedTokens?: number | null;
+  reasoningTokens?: number | null;
+  costUsd?: number | null;
+  requestCount?: number | null;
+};
+
+const isOpenSquillaRouterTool = (toolName: string | undefined): boolean => {
+  if (!toolName) return false;
+  return normalizeToolName(toolName) === 'opensquillarouter';
+};
+
+const isRouterSummary = (value: unknown): value is OpenSquillaRouterSummary => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const getOpenSquillaRouterSummary = (group: ToolGroupItem): OpenSquillaRouterSummary | null => {
+  if (!isOpenSquillaRouterTool(group.toolUse.metadata?.toolName)) return null;
+  const fromUse = group.toolUse.metadata?.openSquillaRouter;
+  if (isRouterSummary(fromUse)) return fromUse;
+  const fromResult = group.toolResult?.metadata?.openSquillaRouter;
+  if (isRouterSummary(fromResult)) return fromResult;
+  const rawResult = group.toolResult?.metadata?.toolResult;
+  if (typeof rawResult === 'string' && rawResult.trim()) {
+    try {
+      const parsed = JSON.parse(rawResult);
+      return isRouterSummary(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const formatRouterMetricValue = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+};
+
+const formatRouterCost = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  if (value === 0) return '$0';
+  return `$${value.toFixed(value < 0.01 ? 5 : 4)}`;
+};
+
+const formatRouterPercent = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return `${Math.round(value * 100)}%`;
+};
+
+const OpenSquillaRouterCard: React.FC<{
+  summary: OpenSquillaRouterSummary;
+  isLastInSequence?: boolean;
+}> = ({ summary, isLastInSequence = true }) => {
+  const sourceModel = summary.baselineModel || summary.routedModel || '-';
+  const targetModel = summary.routedModel || summary.baselineModel || '-';
+  const routed = sourceModel !== '-' && targetModel !== '-' && sourceModel !== targetModel;
+  const metrics = [
+    {
+      label: i18nService.t('coworkOpenSquillaRouterInputTokens'),
+      value: formatRouterMetricValue(summary.inputTokens),
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterOutputTokens'),
+      value: formatRouterMetricValue(summary.outputTokens),
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterCacheTokens'),
+      value: formatRouterMetricValue(summary.cachedTokens),
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterCost'),
+      value: formatRouterCost(summary.costUsd),
+    },
+  ];
+  const details = [
+    {
+      label: i18nService.t('coworkOpenSquillaRouterTier'),
+      value: summary.routedTier || '-',
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterFallback'),
+      value: summary.routingSource || '-',
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterRequests'),
+      value: formatRouterMetricValue(summary.requestCount),
+    },
+    {
+      label: i18nService.t('coworkOpenSquillaRouterConfidence'),
+      value: formatRouterPercent(summary.routingConfidence),
+    },
+  ];
+
+  return (
+    <div className="relative py-2">
+      {!isLastInSequence && (
+        <div className="absolute left-[3.5px] top-[18px] bottom-[-8px] w-px bg-border" />
+      )}
+      <div className="relative z-10 flex items-start gap-2">
+        <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.12)]" />
+        <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-orange-200 bg-gradient-to-br from-orange-50 via-amber-50 to-white p-4 shadow-sm dark:border-orange-500/25 dark:from-orange-950/30 dark:via-amber-950/20 dark:to-surface">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-300">
+                  <QueueListIcon className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {i18nService.t('coworkOpenSquillaRouterTitle')}
+                  </div>
+                  <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-orange-700/70 dark:text-orange-200/70">
+                    {i18nService.t('coworkOpenSquillaRouterSubtitle')}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold text-orange-700 shadow-sm ring-1 ring-orange-200 dark:bg-white/10 dark:text-orange-100 dark:ring-orange-400/20">
+              {i18nService.t('coworkOpenSquillaRouterSelected')}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="max-w-full truncate rounded-xl border border-orange-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-orange-950 shadow-sm dark:border-orange-400/20 dark:bg-white/10 dark:text-orange-50">
+              {sourceModel}
+            </span>
+            {routed && (
+              <>
+                <ChevronRightIcon className="h-4 w-4 shrink-0 text-orange-500" />
+                <span className="max-w-full truncate rounded-xl border border-orange-300 bg-orange-500 px-3 py-2 font-mono text-xs font-semibold text-white shadow-sm dark:border-orange-300/40">
+                  {targetModel}
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {metrics.map((metric) => (
+              <div key={metric.label} className="rounded-xl bg-white/75 px-3 py-2 ring-1 ring-orange-100 dark:bg-white/5 dark:ring-orange-400/10">
+                <div className="text-[10px] font-medium text-orange-900/60 dark:text-orange-100/60">
+                  {metric.label}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {metric.value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-secondary sm:grid-cols-4">
+            {details.map((detail) => (
+              <div key={detail.label} className="min-w-0">
+                <span className="text-muted">{detail.label}</span>
+                <span className="ml-1 font-medium text-foreground">{detail.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ToolCallGroup: React.FC<{
   group: ToolGroupItem;
   isLastInSequence?: boolean;
@@ -846,6 +1020,16 @@ const ToolCallGroup: React.FC<{
     if (!fileChangeId || !onOpenFileChange) return;
     onOpenFileChange(fileChangeId);
   };
+  const openSquillaRouterSummary = getOpenSquillaRouterSummary(group);
+
+  if (openSquillaRouterSummary) {
+    return (
+      <OpenSquillaRouterCard
+        summary={openSquillaRouterSummary}
+        isLastInSequence={isLastInSequence}
+      />
+    );
+  }
 
   return (
     <div className="relative py-1">
@@ -2588,6 +2772,10 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           return i18nService.t('coworkAgentEngineQwenCode');
         case CoworkAgentEngine.DeepSeekTui:
           return i18nService.t('coworkAgentEngineDeepSeekTui');
+        case CoworkAgentEngine.OpenSquilla:
+          return i18nService.t('coworkAgentEngineOpenSquilla');
+        case CoworkAgentEngine.KimiCode:
+          return i18nService.t('coworkAgentEngineKimiCode');
         case CoworkAgentEngine.OpenClaw:
           return i18nService.t('coworkAgentEngineOpenClaw');
         case CoworkAgentEngine.Hermes:
@@ -2612,6 +2800,10 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
         return i18nService.t('coworkAgentEngineQwenCode');
       case CoworkAgentEngine.DeepSeekTui:
         return i18nService.t('coworkAgentEngineDeepSeekTui');
+      case CoworkAgentEngine.OpenSquilla:
+        return i18nService.t('coworkAgentEngineOpenSquilla');
+      case CoworkAgentEngine.KimiCode:
+        return i18nService.t('coworkAgentEngineKimiCode');
       case CoworkAgentEngine.OpenClaw:
         return i18nService.t('coworkAgentEngineOpenClaw');
       case CoworkAgentEngine.Hermes:
@@ -2628,6 +2820,14 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     currentSession?.runtimeSnapshot,
     getEngineLabel,
   ]);
+  const showOpenSquillaConsole = (
+    (currentSession?.runtimeSnapshot?.agentEngine ?? coworkConfig.agentEngine) === CoworkAgentEngine.OpenSquilla
+  );
+
+  useEffect(() => {
+    if (showOpenSquillaConsole || activitySidebarMode !== CoworkActivitySidebarMode.OpenSquillaConsole) return;
+    setActivitySidebarMode(CoworkActivitySidebarMode.Overview);
+  }, [activitySidebarMode, showOpenSquillaConsole]);
 
   const handleReEdit = useCallback((message: CoworkMessage) => {
     const ref = promptInputRef.current;
@@ -3503,6 +3703,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
               liveFileActivities={liveFileActivities}
               selectedLiveFilePath={selectedLiveFilePath}
               runtimeCall={latestRuntimeCall}
+              showOpenSquillaConsole={showOpenSquillaConsole}
               width={activitySidebarWidth}
               onModeChange={handleActivityModeChange}
               onSelectFileChange={handleSelectActivityFileChange}
@@ -3525,6 +3726,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
               liveFileActivities={liveFileActivities}
               selectedLiveFilePath={selectedLiveFilePath}
               runtimeCall={latestRuntimeCall}
+              showOpenSquillaConsole={showOpenSquillaConsole}
               overlay
               onModeChange={handleActivityModeChange}
               onSelectFileChange={handleSelectActivityFileChange}

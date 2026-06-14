@@ -9,6 +9,7 @@ const ENGINE_OPTIONS: CoworkAgentEngineType[] = [
   CoworkAgentEngine.Codex,
   CoworkAgentEngine.CodexApp,
   CoworkAgentEngine.OpenClaw,
+  CoworkAgentEngine.ClawAgent,
   CoworkAgentEngine.Hermes,
   CoworkAgentEngine.OpenCode,
   CoworkAgentEngine.GrokBuild,
@@ -26,6 +27,8 @@ export const getAgentEngineLabel = (engine: CoworkAgentEngineType): string => {
       return i18nService.t('coworkAgentEngineCodexApp');
     case CoworkAgentEngine.OpenClaw:
       return i18nService.t('coworkAgentEngineOpenClaw');
+    case CoworkAgentEngine.ClawAgent:
+      return i18nService.t('coworkAgentEngineClawAgent');
     case CoworkAgentEngine.Hermes:
       return i18nService.t('coworkAgentEngineHermes');
     case CoworkAgentEngine.OpenCode:

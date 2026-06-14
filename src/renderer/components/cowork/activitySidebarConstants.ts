@@ -3,6 +3,7 @@ export const CoworkActivitySidebarMode = {
   RuntimeMonitor: 'runtime_monitor',
   LiveCode: 'live_code',
   CodeDiff: 'code_diff',
+  OpenSquillaConsole: 'opensquilla_console',
 } as const;
 export type CoworkActivitySidebarMode = typeof CoworkActivitySidebarMode[keyof typeof CoworkActivitySidebarMode];
 

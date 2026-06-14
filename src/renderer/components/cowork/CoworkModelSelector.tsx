@@ -76,6 +76,18 @@ const resolveLocalCliAppType = (
   ) {
     return 'deepseek_tui';
   }
+  if (
+    effectiveEngine === CoworkAgentEngine.OpenSquilla
+    && config.opensquillaConfigSource === ExternalAgentConfigSource.LocalCli
+  ) {
+    return 'opensquilla';
+  }
+  if (
+    effectiveEngine === CoworkAgentEngine.KimiCode
+    && config.kimiCodeConfigSource === ExternalAgentConfigSource.LocalCli
+  ) {
+    return 'kimi';
+  }
   return null;
 };
 
@@ -185,6 +197,17 @@ const CoworkModelSelector: React.FC<CoworkModelSelectorProps> = ({
       >
         {i18nService.t('coworkAgentCodexAppModelSourceValue')}
       </div>
+    );
+  }
+
+  if (resolvedEngine === CoworkAgentEngine.ClawAgent) {
+    return (
+      <span
+        className="max-w-[170px] truncate rounded-xl border border-border bg-surface px-2.5 py-1.5 text-xs text-secondary"
+        title={i18nService.t('coworkAgentClawModelManagedHint')}
+      >
+        {i18nService.t('coworkAgentClawModelManaged')}
+      </span>
     );
   }
 

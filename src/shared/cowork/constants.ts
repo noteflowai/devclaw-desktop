@@ -7,6 +7,7 @@ export type DefaultAgentId = typeof DefaultAgent.Id;
 export const CoworkAgentEngine = {
   YdCowork: 'yd_cowork',
   OpenClaw: 'openclaw',
+  ClawAgent: 'claw-agent',
   Hermes: 'hermes',
   ClaudeCode: 'claude_code',
   Codex: 'codex',
@@ -15,6 +16,8 @@ export const CoworkAgentEngine = {
   GrokBuild: 'grok_build',
   QwenCode: 'qwen_code',
   DeepSeekTui: 'deepseek_tui',
+  OpenSquilla: 'opensquilla',
+  KimiCode: 'kimi_code',
 } as const;
 
 export type CoworkAgentEngine = typeof CoworkAgentEngine[keyof typeof CoworkAgentEngine];
@@ -24,6 +27,7 @@ export const DefaultCoworkAgentEngine = CoworkAgentEngine.ClaudeCode;
 export const CoworkAgentEngineValues = [
   CoworkAgentEngine.YdCowork,
   CoworkAgentEngine.OpenClaw,
+  CoworkAgentEngine.ClawAgent,
   CoworkAgentEngine.Hermes,
   CoworkAgentEngine.ClaudeCode,
   CoworkAgentEngine.Codex,
@@ -32,6 +36,8 @@ export const CoworkAgentEngineValues = [
   CoworkAgentEngine.GrokBuild,
   CoworkAgentEngine.QwenCode,
   CoworkAgentEngine.DeepSeekTui,
+  CoworkAgentEngine.OpenSquilla,
+  CoworkAgentEngine.KimiCode,
 ] as const;
 
 export const CliCoworkAgentEngines = [
@@ -43,6 +49,8 @@ export const CliCoworkAgentEngines = [
   CoworkAgentEngine.GrokBuild,
   CoworkAgentEngine.QwenCode,
   CoworkAgentEngine.DeepSeekTui,
+  CoworkAgentEngine.OpenSquilla,
+  CoworkAgentEngine.KimiCode,
 ] as const;
 
 export type CliCoworkAgentEngine = typeof CliCoworkAgentEngines[number];
@@ -111,6 +119,36 @@ export const DeepSeekTuiPermissionModeValues = [
   DeepSeekTuiPermissionMode.Conservative,
 ] as const;
 
+export const OpenSquillaPermissionMode = {
+  Restricted: 'restricted',
+  On: 'on',
+  Bypass: 'bypass',
+  Full: 'full',
+} as const;
+
+export type OpenSquillaPermissionMode = typeof OpenSquillaPermissionMode[keyof typeof OpenSquillaPermissionMode];
+
+export const OpenSquillaPermissionModeValues = [
+  OpenSquillaPermissionMode.Restricted,
+  OpenSquillaPermissionMode.On,
+  OpenSquillaPermissionMode.Bypass,
+  OpenSquillaPermissionMode.Full,
+] as const;
+
+export const KimiCodePermissionMode = {
+  Auto: 'auto',
+  Yolo: 'yolo',
+  Plan: 'plan',
+} as const;
+
+export type KimiCodePermissionMode = typeof KimiCodePermissionMode[keyof typeof KimiCodePermissionMode];
+
+export const KimiCodePermissionModeValues = [
+  KimiCodePermissionMode.Auto,
+  KimiCodePermissionMode.Yolo,
+  KimiCodePermissionMode.Plan,
+] as const;
+
 export function isCoworkAgentEngine(value: unknown): value is CoworkAgentEngine {
   return typeof value === 'string'
     && CoworkAgentEngineValues.includes(value as CoworkAgentEngine);
@@ -139,6 +177,16 @@ export function isQwenCodePermissionMode(value: unknown): value is QwenCodePermi
 export function isDeepSeekTuiPermissionMode(value: unknown): value is DeepSeekTuiPermissionMode {
   return typeof value === 'string'
     && DeepSeekTuiPermissionModeValues.includes(value as DeepSeekTuiPermissionMode);
+}
+
+export function isOpenSquillaPermissionMode(value: unknown): value is OpenSquillaPermissionMode {
+  return typeof value === 'string'
+    && OpenSquillaPermissionModeValues.includes(value as OpenSquillaPermissionMode);
+}
+
+export function isKimiCodePermissionMode(value: unknown): value is KimiCodePermissionMode {
+  return typeof value === 'string'
+    && KimiCodePermissionModeValues.includes(value as KimiCodePermissionMode);
 }
 
 export function isCliCoworkAgentEngine(value: unknown): value is CliCoworkAgentEngine {

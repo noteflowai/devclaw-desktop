@@ -612,6 +612,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private gatewayClient: GatewayClientLike | null = null;
   private gatewayClientVersion: string | null = null;
   private gatewayClientEntryPath: string | null = null;
+  private gatewayClientToken: string | null = null;
   /** Holds the client between start() and onHelloOk so stopGatewayClient can clean it up. */
   private pendingGatewayClient: GatewayClientLike | null = null;
   private gatewayReadyPromise: Promise<void> | null = null;
@@ -1535,7 +1536,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
     const needsNewClient = !this.gatewayClient
       || this.gatewayClientVersion !== connection.version
-      || this.gatewayClientEntryPath !== connection.clientEntryPath;
+      || this.gatewayClientEntryPath !== connection.clientEntryPath
+      || this.gatewayClientToken !== connection.token;
     console.debug(`[ChannelSync] gateway client ${needsNewClient ? 'will be recreated' : 'can be reused'}`);
     if (!needsNewClient && this.gatewayReadyPromise) {
       await waitWithTimeout(this.gatewayReadyPromise, GATEWAY_READY_TIMEOUT_MS);
@@ -1705,6 +1707,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         this.gatewayClient = client;
         this.gatewayClientVersion = connection.version;
         this.gatewayClientEntryPath = connection.clientEntryPath;
+        this.gatewayClientToken = connection.token;
         settleResolve();
         this.lastTickTimestamp = Date.now();
         this.startTickWatchdog();
@@ -1777,6 +1780,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.pendingGatewayClient = null;
     this.gatewayClientVersion = null;
     this.gatewayClientEntryPath = null;
+    this.gatewayClientToken = null;
     this.gatewayReadyPromise = null;
     this.channelSessionSync?.clearCache();
     this.knownChannelSessionIds.clear();

@@ -336,7 +336,7 @@ contextBridge.exposeInMainWorld('electron', {
     setConfig: (config: {
       workingDirectory?: string;
       executionMode?: 'auto' | 'local' | 'sandbox';
-      agentEngine?: 'openclaw' | 'hermes' | 'yd_cowork' | 'claude_code' | 'codex' | 'codex_app' | 'opencode' | 'grok_build' | 'qwen_code' | 'deepseek_tui';
+      agentEngine?: 'openclaw' | 'hermes' | 'yd_cowork' | 'claude_code' | 'codex' | 'codex_app' | 'opencode' | 'grok_build' | 'qwen_code' | 'deepseek_tui' | 'opensquilla' | 'kimi_code';
       openclawConfigSource?: 'wesight_model' | 'local_cli';
       claudeCodeConfigSource?: 'wesight_model' | 'local_cli';
       codexConfigSource?: 'wesight_model' | 'local_cli';
@@ -347,6 +347,10 @@ contextBridge.exposeInMainWorld('electron', {
       qwenCodePermissionMode?: 'auto' | 'conservative';
       deepseekTuiConfigSource?: 'wesight_model' | 'local_cli';
       deepseekTuiPermissionMode?: 'auto' | 'conservative';
+      opensquillaConfigSource?: 'wesight_model' | 'local_cli';
+      opensquillaPermissionMode?: 'restricted' | 'on' | 'bypass' | 'full';
+      kimiCodeConfigSource?: 'wesight_model' | 'local_cli';
+      kimiCodePermissionMode?: 'auto' | 'yolo' | 'plan';
       memoryEnabled?: boolean;
       memoryImplicitUpdateEnabled?: boolean;
       memoryLlmJudgeEnabled?: boolean;
@@ -356,7 +360,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('cowork:config:set', config),
     listAgentEngines: (input?: {
       forceRefresh?: boolean;
-      appTypes?: Array<'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui'>;
+      appTypes?: Array<'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui' | 'opensquilla' | 'kimi'>;
     }) =>
       ipcRenderer.invoke('cowork:agentEngines:list', input),
     getRuntimeMetricsSummary: (filters: any) =>
@@ -552,6 +556,15 @@ contextBridge.exposeInMainWorld('electron', {
     openPath: (filePath: string) => ipcRenderer.invoke('shell:openPath', filePath),
     showItemInFolder: (filePath: string) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  },
+  openSquillaControl: {
+    probe: () => ipcRenderer.invoke('opensquilla:control:probe'),
+  },
+  openSquillaGateway: {
+    status: () => ipcRenderer.invoke('opensquilla:gateway:status'),
+    start: () => ipcRenderer.invoke('opensquilla:gateway:start'),
+    restart: () => ipcRenderer.invoke('opensquilla:gateway:restart'),
+    stop: () => ipcRenderer.invoke('opensquilla:gateway:stop'),
   },
   autoLaunch: {
     get: () => ipcRenderer.invoke('app:getAutoLaunch'),

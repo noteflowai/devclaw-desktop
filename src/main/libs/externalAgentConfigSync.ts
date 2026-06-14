@@ -969,6 +969,9 @@ export const applyExternalAgentConfigForEngine = (
   if (engine === CoworkAgentEngine.DeepSeekTui) {
     return;
   }
+  if (engine === CoworkAgentEngine.OpenSquilla) {
+    return;
+  }
 };
 
 const buildProviderConfig = (

@@ -57,6 +57,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     externalCliCodexGeneratedImageAlt: 'Codex 生成的图片',
     externalCliCodexOpenImage: '打开图片',
     externalCliCodexNoVisibleOutput: 'Codex CLI 已完成任务，但没有返回可显示内容。请检查本机 Codex 会话或重新发送消息。',
+    hermesNoVisibleOutput: 'Hermes Agent 超过 {seconds} 秒未产生可显示内容。请检查 Hermes Agent 网关与模型提供方配置。',
 
     // Feishu bot install
     feishuVerifyCredentialsFailed: '凭证验证失败，请检查 App ID 和 App Secret 是否正确',
@@ -264,6 +265,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     externalCliCodexGeneratedImageAlt: 'Codex generated image',
     externalCliCodexOpenImage: 'Open image',
     externalCliCodexNoVisibleOutput: 'Codex CLI completed the task, but returned no visible content. Check the local Codex session or send the message again.',
+    hermesNoVisibleOutput: 'Hermes Agent did not produce any visible output after {seconds} seconds. Check the Hermes Agent gateway and model provider configuration.',
 
     // Feishu bot install
     feishuVerifyCredentialsFailed: 'Credential validation failed. Please check your App ID and App Secret.',
