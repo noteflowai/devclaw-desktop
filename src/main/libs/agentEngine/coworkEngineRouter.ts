@@ -19,6 +19,7 @@ import { ENGINE_SWITCHED_CODE } from './types';
 type RouterDeps = {
   getCurrentEngine: () => CoworkAgentEngine;
   openclawRuntime: CoworkRuntime;
+  clawAgentRuntime: CoworkRuntime;
   hermesRuntime: CoworkRuntime;
   claudeRuntime: CoworkRuntime;
   claudeCodeRuntime: CoworkRuntime;
@@ -47,6 +48,7 @@ export class CoworkEngineRouter extends EventEmitter implements CoworkRuntime {
     this.getCurrentEngine = deps.getCurrentEngine;
     this.runtimeByEngine = {
       [CoworkAgentEngineValue.OpenClaw]: deps.openclawRuntime,
+      [CoworkAgentEngineValue.ClawAgent]: deps.clawAgentRuntime,
       [CoworkAgentEngineValue.Hermes]: deps.hermesRuntime,
       [CoworkAgentEngineValue.YdCowork]: deps.claudeRuntime,
       [CoworkAgentEngineValue.ClaudeCode]: deps.claudeCodeRuntime,
@@ -63,6 +65,7 @@ export class CoworkEngineRouter extends EventEmitter implements CoworkRuntime {
     this.telemetryTracker = deps.telemetryTracker;
 
     this.bindRuntimeEvents(CoworkAgentEngineValue.OpenClaw, deps.openclawRuntime);
+    this.bindRuntimeEvents(CoworkAgentEngineValue.ClawAgent, deps.clawAgentRuntime);
     this.bindRuntimeEvents(CoworkAgentEngineValue.Hermes, deps.hermesRuntime);
     this.bindRuntimeEvents(CoworkAgentEngineValue.YdCowork, deps.claudeRuntime);
     this.bindRuntimeEvents(CoworkAgentEngineValue.ClaudeCode, deps.claudeCodeRuntime);

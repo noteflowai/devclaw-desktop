@@ -74,6 +74,8 @@ const initialState: CoworkState = {
     systemPrompt: '',
     executionMode: 'local',
     agentEngine: DefaultCoworkAgentEngine,
+    clawAgentGatewayUrl: '',
+    clawAgentToken: '',
     openclawConfigSource: ExternalAgentConfigSource.LocalCli,
     claudeCodeConfigSource: ExternalAgentConfigSource.WesightModel,
     claudeCodePermissionMode: ClaudeCodePermissionMode.BypassPermissions,

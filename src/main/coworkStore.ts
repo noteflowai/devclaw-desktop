@@ -715,6 +715,8 @@ export interface CoworkConfig {
   systemPrompt: string;
   executionMode: CoworkExecutionMode;
   agentEngine: CoworkAgentEngine;
+  clawAgentGatewayUrl: string;
+  clawAgentToken: string;
   openclawConfigSource: ExternalAgentConfigSourceType;
   claudeCodeConfigSource: ExternalAgentConfigSourceType;
   claudeCodePermissionMode: ClaudeCodePermissionModeType;
@@ -742,6 +744,8 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'workingDirectory'
   | 'executionMode'
   | 'agentEngine'
+  | 'clawAgentGatewayUrl'
+  | 'clawAgentToken'
   | 'openclawConfigSource'
   | 'claudeCodeConfigSource'
   | 'claudeCodePermissionMode'
@@ -1852,6 +1856,8 @@ export class CoworkStore {
         'workingDirectory',
         'executionMode',
         'agentEngine',
+        'clawAgentGatewayUrl',
+        'clawAgentToken',
         'openclawConfigSource',
         'claudeCodeConfigSource',
         'claudeCodePermissionMode',
@@ -1884,6 +1890,8 @@ export class CoworkStore {
         systemPrompt: getDefaultSystemPrompt(),
         executionMode: 'local' as CoworkExecutionMode,
         agentEngine: normalizeCoworkAgentEngineValue(cfg.get('agentEngine')),
+        clawAgentGatewayUrl: cfg.get('clawAgentGatewayUrl') || '',
+        clawAgentToken: cfg.get('clawAgentToken') || '',
         openclawConfigSource: normalizeOpenClawConfigSource(cfg.get('openclawConfigSource')),
         claudeCodeConfigSource: normalizeExternalAgentConfigSource(cfg.get('claudeCodeConfigSource')),
         claudeCodePermissionMode: normalizeClaudeCodePermissionMode(cfg.get('claudeCodePermissionMode')),
@@ -1929,6 +1937,12 @@ export class CoworkStore {
       }
       if (config.agentEngine !== undefined) {
         entries.push(['agentEngine', normalizeCoworkAgentEngineValue(config.agentEngine)]);
+      }
+      if (config.clawAgentGatewayUrl !== undefined) {
+        entries.push(['clawAgentGatewayUrl', config.clawAgentGatewayUrl]);
+      }
+      if (config.clawAgentToken !== undefined) {
+        entries.push(['clawAgentToken', config.clawAgentToken]);
       }
       if (config.openclawConfigSource !== undefined) {
         entries.push(['openclawConfigSource', normalizeExternalAgentConfigSource(config.openclawConfigSource)]);

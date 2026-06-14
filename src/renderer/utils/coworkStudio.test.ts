@@ -48,6 +48,8 @@ const makeConfig = (agentEngine: CoworkAgentEngine): CoworkConfig => ({
   systemPrompt: '',
   executionMode: 'local',
   agentEngine,
+  clawAgentGatewayUrl: '',
+  clawAgentToken: '',
   openclawConfigSource: ExternalAgentConfigSource.LocalCli,
   claudeCodeConfigSource: ExternalAgentConfigSource.WesightModel,
   claudeCodePermissionMode: ClaudeCodePermissionMode.BypassPermissions,

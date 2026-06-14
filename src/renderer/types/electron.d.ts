@@ -102,6 +102,8 @@ interface CoworkConfig {
   systemPrompt: string;
   executionMode: 'auto' | 'local' | 'sandbox';
   agentEngine: CoworkAgentEngine;
+  clawAgentGatewayUrl: string;
+  clawAgentToken: string;
   openclawConfigSource: ExternalAgentConfigSource;
   claudeCodeConfigSource: ExternalAgentConfigSource;
   claudeCodePermissionMode: ClaudeCodePermissionMode;
@@ -129,6 +131,8 @@ type CoworkConfigUpdate = Partial<Pick<
   | 'workingDirectory'
   | 'executionMode'
   | 'agentEngine'
+  | 'clawAgentGatewayUrl'
+  | 'clawAgentToken'
   | 'openclawConfigSource'
   | 'claudeCodeConfigSource'
   | 'claudeCodePermissionMode'

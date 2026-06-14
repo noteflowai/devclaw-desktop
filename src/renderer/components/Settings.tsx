@@ -103,6 +103,11 @@ const COWORK_AGENT_ENGINE_OPTIONS: Array<{
     hintKey: 'coworkAgentEngineOpenClawHint',
   },
   {
+    value: CoworkAgentEngineValue.ClawAgent,
+    labelKey: 'coworkAgentEngineClawAgent',
+    hintKey: 'coworkAgentEngineClawAgentHint',
+  },
+  {
     value: CoworkAgentEngineValue.Hermes,
     labelKey: 'coworkAgentEngineHermes',
     hintKey: 'coworkAgentEngineHermesHint',
@@ -953,6 +958,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const coworkConfig = useSelector((state: RootState) => state.cowork.config);
 
   const [coworkAgentEngine, setCoworkAgentEngine] = useState<CoworkAgentEngine>(coworkConfig.agentEngine || CoworkAgentEngineValue.YdCowork);
+  const [clawAgentGatewayUrl, setClawAgentGatewayUrl] = useState<string>(coworkConfig.clawAgentGatewayUrl || '');
+  const [clawAgentToken, setClawAgentToken] = useState<string>(coworkConfig.clawAgentToken || '');
   const [expandedCoworkAgentEngine, setExpandedCoworkAgentEngine] = useState<CoworkAgentEngine | null>(null);
   const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(coworkConfig.memoryEnabled ?? true);
   const [coworkMemoryLlmJudgeEnabled, setCoworkMemoryLlmJudgeEnabled] = useState<boolean>(coworkConfig.memoryLlmJudgeEnabled ?? false);
@@ -1838,7 +1845,9 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     || kimiCodeConfigSource !== coworkConfig.kimiCodeConfigSource
     || kimiCodePermissionMode !== coworkConfig.kimiCodePermissionMode
     || coworkMemoryEnabled !== coworkConfig.memoryEnabled
-    || coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled;
+    || coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled
+    || clawAgentGatewayUrl !== coworkConfig.clawAgentGatewayUrl
+    || clawAgentToken !== coworkConfig.clawAgentToken;
   const hasCoworkAgentEngineApplyChanges = coworkAgentEngine !== coworkConfig.agentEngine
     || (coworkAgentEngine === CoworkAgentEngineValue.OpenClaw
       && openclawConfigSource !== coworkConfig.openclawConfigSource)
@@ -2258,6 +2267,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       if (hasCoworkConfigChanges) {
         const updated = await coworkService.updateConfig({
           agentEngine: coworkAgentEngine,
+          clawAgentGatewayUrl,
+          clawAgentToken,
           openclawConfigSource,
           claudeCodeConfigSource,
           claudeCodePermissionMode,
@@ -3805,6 +3816,39 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const renderSelectedAgentEngineDetails = (engine: CoworkAgentEngine) => {
     if (engine === CoworkAgentEngineValue.CodexApp) {
       return renderCodexAppAgentEngineDetails();
+    }
+    if (engine === CoworkAgentEngineValue.ClawAgent) {
+      return (
+        <div className="mt-4 space-y-3">
+          <label className="block">
+            <span className="block text-xs font-medium text-foreground">
+              {i18nService.t('coworkAgentClawGatewayUrl')}
+            </span>
+            <input
+              type="text"
+              value={clawAgentGatewayUrl}
+              disabled={isSaving}
+              placeholder={i18nService.t('coworkAgentClawGatewayUrlPlaceholder')}
+              onChange={(event) => setClawAgentGatewayUrl(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              className="mt-1 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-foreground">
+              {i18nService.t('coworkAgentClawToken')}
+            </span>
+            <input
+              type="password"
+              value={clawAgentToken}
+              disabled={isSaving}
+              onChange={(event) => setClawAgentToken(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              className="mt-1 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+        </div>
+      );
     }
     if (
       engine === CoworkAgentEngineValue.ClaudeCode

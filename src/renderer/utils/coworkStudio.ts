@@ -46,6 +46,15 @@ const engineAvatarManifest: Record<CoworkAgentEngine, CoworkStudioAvatar> = {
     faceColor: 0xffc2a6,
     prop: 'claw',
   },
+  [CoworkAgentEngine.ClawAgent]: {
+    id: 'claw_agent',
+    nameTag: 'Claw Agent',
+    primaryColor: 0x6d5ae6,
+    secondaryColor: 0x3f3494,
+    accentColor: 0xc4b5fd,
+    faceColor: 0xddd6fe,
+    prop: 'claw',
+  },
   [CoworkAgentEngine.ClaudeCode]: {
     id: 'claude_code',
     nameTag: 'Claude Code',

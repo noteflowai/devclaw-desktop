@@ -84,6 +84,7 @@ import type { ScheduledTaskHandlerDeps } from './ipcHandlers/scheduledTask/handl
 import type { ScheduledTaskHelperDeps } from './ipcHandlers/scheduledTask/helpers';
 import {
   ClaudeRuntimeAdapter,
+  ClawAgentRuntimeAdapter,
   CodexAppRuntimeAdapter,
   type CoworkAgentEngine,
   CoworkEngineRouter,
@@ -777,6 +778,7 @@ let codexAppServerClient: CodexAppServerClient | null = null;
 let codexAppTaskSync: CodexAppTaskSync | null = null;
 let claudeRuntimeAdapter: ClaudeRuntimeAdapter | null = null;
 let openClawRuntimeAdapter: OpenClawRuntimeAdapter | null = null;
+let clawAgentRuntimeAdapter: ClawAgentRuntimeAdapter | null = null;
 let hermesRuntimeAdapter: HermesRuntimeAdapter | null = null;
 let claudeCodeRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
 let codexRuntimeAdapter: ExternalCliRuntimeAdapter | null = null;
@@ -2400,9 +2402,18 @@ const getCoworkEngineRouter = () => {
         ensureRunning: ensureHermesRunningForCowork,
       });
     }
+    if (!clawAgentRuntimeAdapter) {
+      clawAgentRuntimeAdapter = new ClawAgentRuntimeAdapter(getCoworkStore(), () => {
+        const clawCfg = getCoworkStore().getConfig();
+        const gatewayUrl = (clawCfg.clawAgentGatewayUrl || process.env.CLAW_AGENT_GATEWAY_URL || '').trim();
+        const token = (clawCfg.clawAgentToken || process.env.CLAW_AGENT_TOKEN || '').trim();
+        return { gatewayUrl, token: token || undefined };
+      });
+    }
     coworkEngineRouter = new CoworkEngineRouter({
       getCurrentEngine: resolveCoworkAgentEngine,
       openclawRuntime: openClawRuntimeAdapter,
+      clawAgentRuntime: clawAgentRuntimeAdapter,
       hermesRuntime: hermesRuntimeAdapter,
       claudeRuntime: claudeRuntimeAdapter,
       claudeCodeRuntime: claudeCodeRuntimeAdapter,
@@ -5827,6 +5838,8 @@ if (!gotTheLock) {
     workingDirectory?: string;
     executionMode?: 'auto' | 'local' | 'sandbox';
     agentEngine?: CoworkAgentEngine;
+    clawAgentGatewayUrl?: string;
+    clawAgentToken?: string;
     claudeCodeConfigSource?: unknown;
     claudeCodePermissionMode?: unknown;
     codexConfigSource?: unknown;

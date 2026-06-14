@@ -38,6 +38,11 @@ const ENGINE_OPTIONS: Array<{
     hintKey: 'coworkAgentEngineOpenClawHint',
   },
   {
+    engine: CoworkAgentEngine.ClawAgent,
+    labelKey: 'coworkAgentEngineClawAgent',
+    hintKey: 'coworkAgentEngineClawAgentHint',
+  },
+  {
     engine: CoworkAgentEngine.Hermes,
     labelKey: 'coworkAgentEngineHermes',
     hintKey: 'coworkAgentEngineHermesHint',

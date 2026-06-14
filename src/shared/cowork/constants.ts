@@ -7,6 +7,7 @@ export type DefaultAgentId = typeof DefaultAgent.Id;
 export const CoworkAgentEngine = {
   YdCowork: 'yd_cowork',
   OpenClaw: 'openclaw',
+  ClawAgent: 'claw-agent',
   Hermes: 'hermes',
   ClaudeCode: 'claude_code',
   Codex: 'codex',
@@ -26,6 +27,7 @@ export const DefaultCoworkAgentEngine = CoworkAgentEngine.ClaudeCode;
 export const CoworkAgentEngineValues = [
   CoworkAgentEngine.YdCowork,
   CoworkAgentEngine.OpenClaw,
+  CoworkAgentEngine.ClawAgent,
   CoworkAgentEngine.Hermes,
   CoworkAgentEngine.ClaudeCode,
   CoworkAgentEngine.Codex,

@@ -61,6 +61,7 @@ const usesLocalCliModelConfigForEngine = (
     engine === CoworkAgentEngine.OpenClaw
     && config.openclawConfigSource === ExternalAgentConfigSource.LocalCli
   )
+  || engine === CoworkAgentEngine.ClawAgent
   || (
     engine === CoworkAgentEngine.ClaudeCode
     && config.claudeCodeConfigSource === ExternalAgentConfigSource.LocalCli

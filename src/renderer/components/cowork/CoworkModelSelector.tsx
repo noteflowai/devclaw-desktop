@@ -200,6 +200,17 @@ const CoworkModelSelector: React.FC<CoworkModelSelectorProps> = ({
     );
   }
 
+  if (resolvedEngine === CoworkAgentEngine.ClawAgent) {
+    return (
+      <span
+        className="max-w-[170px] truncate rounded-xl border border-border bg-surface px-2.5 py-1.5 text-xs text-secondary"
+        title={i18nService.t('coworkAgentClawModelManagedHint')}
+      >
+        {i18nService.t('coworkAgentClawModelManaged')}
+      </span>
+    );
+  }
+
   if (!appType) {
     return <ModelSelector dropdownDirection={dropdownDirection} />;
   }
