@@ -147,7 +147,7 @@ const engineAvatarManifest: Record<CoworkAgentEngine, CoworkStudioAvatar> = {
   },
   [CoworkAgentEngine.YdCowork]: {
     id: 'yd_cowork',
-    nameTag: 'WeSight',
+    nameTag: 'DevClaw',
     primaryColor: 0x6c63ff,
     secondaryColor: 0x34306d,
     accentColor: 0x9ef7ff,

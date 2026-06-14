@@ -426,7 +426,7 @@ const DesktopPetWindow: React.FC = () => {
             ×
           </button>
           <div className="desktop-pet-task-heading">
-            <span className="desktop-pet-task-app">WeSight</span>
+            <span className="desktop-pet-task-app">DevClaw</span>
             <span className="desktop-pet-task-source">{getTaskSourceLabel(taskSnapshot.source)}</span>
           </div>
           <div className="desktop-pet-task-title">{taskSnapshot.title}</div>

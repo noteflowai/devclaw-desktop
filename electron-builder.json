@@ -1,7 +1,7 @@
 {
-  "appId": "ai.wesight.app",
-  "productName": "WeSight",
-  "executableName": "WeSight",
+  "appId": "host.oneai.devclaw-desktop",
+  "productName": "DevClaw Desktop",
+  "executableName": "DevClawDesktop",
   "directories": {
     "output": "release"
   },

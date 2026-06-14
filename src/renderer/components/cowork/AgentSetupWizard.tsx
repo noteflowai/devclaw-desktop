@@ -34,7 +34,7 @@ const AgentSetupWizard: React.FC<AgentSetupWizardProps> = ({ onComplete }) => {
                 {i18nService.t('agentSetupSubtitle')}
               </p>
             </div>
-            <img src="logo.png" alt="WeSight" className="h-14 w-14 shrink-0" />
+            <img src="logo.png" alt="DevClaw Desktop" className="h-14 w-14 shrink-0" />
           </div>
         </div>
 

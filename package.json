@@ -1,9 +1,9 @@
 {
-  "name": "wesight",
+  "name": "devclaw-desktop",
   "private": true,
   "author": {
-    "name": "WeSight",
-    "email": "hello@wesight.ai"
+    "name": "NoteFlow AI",
+    "email": "hello@oneai.host"
   },
   "license": "MIT",
   "version": "2026.6.10",
