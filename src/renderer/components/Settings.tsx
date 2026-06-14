@@ -6416,7 +6416,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
             {/* Logo & App Name */}
             <img
               src="logo.png"
-              alt="WeSight"
+              alt="DevClaw Desktop"
               className="w-16 h-16 mb-3 cursor-pointer select-none"
               onClick={() => {
                 const next = logoClickCount + 1;
@@ -6426,7 +6426,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 }
               }}
             />
-            <h3 className="text-lg font-semibold text-foreground">WeSight</h3>
+            <h3 className="text-lg font-semibold text-foreground">DevClaw Desktop</h3>
             <span className="text-xs text-secondary mt-1">v{appVersion}</span>
 
             {/* Info Card */}
@@ -6566,7 +6566,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
               </div>
 
               <p className="mt-5 text-xs text-secondary">
-                &copy; {new Date().getFullYear()} WeSight by 苍何团队 · 数据本地存储 版权所有
+                &copy; {new Date().getFullYear()} DevClaw Desktop · 基于 WeSight（苍何团队，MIT）· 数据本地存储
               </p>
             </div>
           </div>
